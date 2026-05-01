@@ -1,0 +1,17 @@
+[Unit]
+Description=LetMeFit FastAPI Backend
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/letmefit/backend
+EnvironmentFile=/opt/letmefit/backend/.env.production
+ExecStart=/opt/letmefit/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+User=letmefit
+Group=letmefit
+
+[Install]
+WantedBy=multi-user.target

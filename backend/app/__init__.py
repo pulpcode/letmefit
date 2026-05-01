@@ -1,0 +1,1 @@
+"""LetMeFit backend application package."""

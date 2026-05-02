@@ -308,6 +308,7 @@
           </div>
           <div class="actions">
             <button id="createConversation">创建会话</button>
+            <button class="secondary" id="loadLatestConversation">加载最近待确认会话</button>
             <button id="sendMessage">发送消息</button>
             <button class="secondary" id="listPending">查询待确认动作</button>
             <button id="confirmPending">确认动作</button>
@@ -343,6 +344,8 @@
       const state = {
         accessToken: localStorage.getItem("letmefit_access_token") || "",
         refreshToken: localStorage.getItem("letmefit_refresh_token") || "",
+        conversationId: localStorage.getItem("letmefit_conversation_id") || "",
+        pendingActionId: localStorage.getItem("letmefit_pending_action_id") || "",
       };
 
       const $ = (id) => document.getElementById(id);
@@ -354,6 +357,8 @@
       function updateState() {
         $("accessTokenView").textContent = state.accessToken || "未登录";
         $("refreshToken").value = state.refreshToken;
+        $("conversationId").value = state.conversationId;
+        $("pendingActionId").value = state.pendingActionId;
         $("statusPill").textContent = state.accessToken ? "已登录" : "未登录";
         $("statusPill").className = `pill ${state.accessToken ? "ok" : "warn"}`;
       }
@@ -366,6 +371,26 @@
         if (data.refresh_token) {
           state.refreshToken = data.refresh_token;
           localStorage.setItem("letmefit_refresh_token", state.refreshToken);
+        }
+        updateState();
+      }
+
+      function saveConversationId(value) {
+        state.conversationId = value || "";
+        if (state.conversationId) {
+          localStorage.setItem("letmefit_conversation_id", state.conversationId);
+        } else {
+          localStorage.removeItem("letmefit_conversation_id");
+        }
+        updateState();
+      }
+
+      function savePendingActionId(value) {
+        state.pendingActionId = value || "";
+        if (state.pendingActionId) {
+          localStorage.setItem("letmefit_pending_action_id", state.pendingActionId);
+        } else {
+          localStorage.removeItem("letmefit_pending_action_id");
         }
         updateState();
       }
@@ -450,6 +475,8 @@
           state.refreshToken = "";
           localStorage.removeItem("letmefit_access_token");
           localStorage.removeItem("letmefit_refresh_token");
+          localStorage.removeItem("letmefit_conversation_id");
+          localStorage.removeItem("letmefit_pending_action_id");
           updateState();
           return response;
         });
@@ -478,8 +505,41 @@
             method: "POST",
             body: { title: $("conversationTitle").value },
           });
-          $("conversationId").value = response.data.conversation_id;
+          saveConversationId(response.data.conversation_id);
+          savePendingActionId("");
           return response;
+        });
+
+      $("loadLatestConversation").onclick = () =>
+        run(async () => {
+          const conversationsResponse = await api("/conversations");
+          const conversations = conversationsResponse.data.conversations || [];
+          let selected = conversations[0] || null;
+          let pendingResponse = null;
+          for (const conversation of conversations) {
+            const response = await api(`/conversations/${conversation.id}/pending-actions`);
+            const pending = response.data.pending_actions?.find(
+              (action) => action.status === "pending_confirmation",
+            );
+            if (pending) {
+              selected = conversation;
+              pendingResponse = response;
+              saveConversationId(conversation.id);
+              savePendingActionId(pending.pending_action_id);
+              return {
+                selected_conversation: conversation,
+                pending_actions: response.data.pending_actions,
+              };
+            }
+          }
+          if (selected) {
+            saveConversationId(selected.id);
+            pendingResponse = await api(`/conversations/${selected.id}/pending-actions`);
+          }
+          return {
+            selected_conversation: selected,
+            pending_actions: pendingResponse?.data?.pending_actions || [],
+          };
         });
 
       $("sendMessage").onclick = () =>
@@ -491,7 +551,7 @@
           });
           const action = response.data.pending_actions?.[0];
           if (action) {
-            $("pendingActionId").value = action.pending_action_id;
+            savePendingActionId(action.pending_action_id);
           }
           return response;
         });
@@ -503,7 +563,7 @@
             (action) => action.status === "pending_confirmation",
           );
           if (pending) {
-            $("pendingActionId").value = pending.pending_action_id;
+            savePendingActionId(pending.pending_action_id);
           }
           return response;
         });
@@ -556,11 +616,18 @@
       $("clearState").onclick = () => {
         state.accessToken = "";
         state.refreshToken = "";
+        state.conversationId = "";
+        state.pendingActionId = "";
         localStorage.removeItem("letmefit_access_token");
         localStorage.removeItem("letmefit_refresh_token");
+        localStorage.removeItem("letmefit_conversation_id");
+        localStorage.removeItem("letmefit_pending_action_id");
         updateState();
         log({ cleared: true });
       };
+
+      $("conversationId").onchange = () => saveConversationId($("conversationId").value);
+      $("pendingActionId").onchange = () => savePendingActionId($("pendingActionId").value);
 
       $("recordDate").value = today();
       updateState();

@@ -29,3 +29,12 @@ def test_health_uses_incoming_request_id() -> None:
     assert response.status_code == 200
     assert response.json()["request_id"] == "req_test"
     assert response.headers["x-request-id"] == "req_test"
+
+
+def test_static_test_page_is_served() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/test/")
+
+    assert response.status_code == 200
+    assert "LetMeFit API Test" in response.text

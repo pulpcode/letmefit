@@ -574,6 +574,8 @@ V1 的交互形式是通用 Agent 对话。用户可以发送文本、图片、�
 
 Agent 接口可以返回自然语言回复，也可以返回结构化待确认动作。只要动作会产生餐食、身体指标、每日总结等实质业务记录，后端必须先生成 `pending_action`，由客户端在对话中展示确认卡片。用户确认或修改后，后端才写入正式记录。
 
+模型调用前，后端会先用 `InputNormalizer` 处理图片和音频 part，再用 `ContextBuilder` 动态组装上下文。上下文包含多模态处理状态、滚动摘要、最近若干条会话消息、当前待确认动作、用户档案和最近正式记录；不会把全量历史消息直接发送给模型。较早消息会压缩进 `conversation_summaries`，该摘要只用于后续模型上下文，不作为正式事实来源。
+
 ### POST /conversations
 
 创建会话。
@@ -689,7 +691,9 @@ Agent 接口可以返回自然语言回复，也可以返回结构化待确认�
 }
 ```
 
-V1 当前实现先使用 mock extraction 打通确认闭环；真实 LLM、ASR 和图片理解模型后续通过 adapter 替换。
+V1 支持可替换 extraction provider。当前可使用 `mock` 本地提取或 `bailian` 百炼 OpenAI-compatible Chat Completions。ASR 与图片理解已预留 adapter：默认 `mock` provider 只记录媒体状态和警告，不会假装读取图片或转写语音；接入真实模型后，归一化结果会以派生文本和 `input_normalization` 上下文进入 extraction provider。
+
+ASR 第一版支持 `dashscope_recording`，即百炼/DashScope Paraformer 录音文件识别。该接口要求音频是公网可访问 HTTP/HTTPS URL 或支持的 OSS URL；`client_local` 音频不会被后端直接识别，只会产生未处理状态，直到客户端提供临时可访问文件。
 
 ### GET /conversations/{conversation_id}/messages
 

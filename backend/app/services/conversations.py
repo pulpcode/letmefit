@@ -4,7 +4,8 @@ from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ai.mock_extraction import MockExtractionService
+from app.ai.extraction_service import ExtractionService
+from app.ai.input_normalizer import InputNormalizer
 from app.auth.security import new_id, utc_now
 from app.core.database import get_db
 from app.core.errors import AppError
@@ -14,12 +15,19 @@ from app.schemas.conversation import (
     MessageContentItem,
     MessageCreateRequest,
 )
+from app.services.conversation_context import (
+    ConversationContextBuilder,
+    ConversationSummaryService,
+)
 
 
 class ConversationService:
     def __init__(self, db: Session) -> None:
         self.db = db
-        self.extraction_service = MockExtractionService(db)
+        self.extraction_service = ExtractionService(db)
+        self.context_builder = ConversationContextBuilder(db)
+        self.summary_service = ConversationSummaryService(db)
+        self.input_normalizer = InputNormalizer()
 
     def create_conversation(self, user_id: str, payload: ConversationCreateRequest) -> dict:
         conversation = Conversation(
@@ -77,13 +85,21 @@ class ConversationService:
         )
         self.db.add(user_message)
         self.db.flush()
-        self._add_message_attachments(user_id, user_message.id, payload.content)
+        media_files = self._add_message_attachments(user_id, user_message.id, payload.content)
+        normalized_input = self.input_normalizer.normalize(payload.content, media_files)
+        context = self.context_builder.build(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            exclude_message_id=user_message.id,
+        )
+        context["input_normalization"] = normalized_input.context
 
         extraction_result = self.extraction_service.process_message(
             user_id=user_id,
             conversation_id=conversation.id,
             message_id=user_message.id,
-            content=payload.content,
+            content=normalized_input.content,
+            context=context,
         )
         assistant_message = ConversationMessage(
             id=new_id("msg"),
@@ -99,6 +115,8 @@ class ConversationService:
         user_message.requires_review = extraction_result["requires_review"]
         conversation.status = "active"
         self.db.add(assistant_message)
+        self.db.flush()
+        self.summary_service.compact_if_needed(user_id, conversation.id)
         self.db.commit()
 
         return {
@@ -115,10 +133,10 @@ class ConversationService:
         user_id: str,
         message_id: str,
         content: list[MessageContentItem],
-    ) -> None:
+    ) -> dict[str, UploadFile]:
         file_ids = self._extract_file_ids(content)
         if not file_ids:
-            return
+            return {}
 
         files = list(
             self.db.scalars(
@@ -149,6 +167,7 @@ class ConversationService:
                     created_at=utc_now(),
                 )
             )
+        return {file.id: file for file in files}
 
     def _extract_file_ids(self, content: list[MessageContentItem]) -> list[str]:
         file_ids = []

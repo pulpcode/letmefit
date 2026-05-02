@@ -1,0 +1,156 @@
+import re
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+
+from app.ai.providers.base import ExtractionProvider
+from app.ai.types import ExtractionActionSpec, ExtractionInput, ExtractionProviderResult
+from app.core.config import Settings, get_settings
+from app.schemas.conversation import MessageContentItem
+
+
+class MockExtractionProvider(ExtractionProvider):
+    provider_name = "mock"
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+
+    def extract(self, payload: ExtractionInput) -> ExtractionProviderResult:
+        text = self._joined_text(payload.content)
+        if self._is_out_of_scope(text):
+            return ExtractionProviderResult(
+                assistant_text=(
+                    "这个问题可能涉及医疗诊断或治疗建议，我不能替你判断。"
+                    "可以聊聊一般健身记录、饮食习惯和训练安排。"
+                ),
+                intent="out_of_scope",
+                requires_review=False,
+                confidence=Decimal("0.80"),
+                raw_output={"mock": True, "text": text},
+            )
+
+        action_specs = self._action_specs(text, payload.content)
+        if not action_specs:
+            return ExtractionProviderResult(
+                assistant_text=(
+                    "我可以帮你记录饮食、体重和训练相关信息。"
+                    "你可以继续补充具体内容。"
+                ),
+                intent="answer_fitness_question",
+                requires_review=False,
+                confidence=Decimal("0.70"),
+                raw_output={"mock": True, "text": text},
+            )
+
+        return ExtractionProviderResult(
+            assistant_text=self._assistant_text(action_specs),
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.60"),
+            action_specs=action_specs,
+            raw_output={"mock": True, "text": text},
+        )
+
+    def _action_specs(
+        self,
+        text: str,
+        content: list[MessageContentItem],
+    ) -> list[ExtractionActionSpec]:
+        specs = []
+        lowered = text.lower()
+        has_image = any(item.type == "image" for item in content)
+        meal_keywords = ("早餐", "午餐", "晚餐", "加餐", "吃", "餐", "meal", "lunch", "dinner")
+        if has_image or any(keyword in lowered for keyword in meal_keywords):
+            specs.append(self._meal_spec(lowered, has_image))
+
+        body_keywords = ("体重", "体脂", "bmi", "weight", "公斤", "kg", "斤")
+        if any(keyword in lowered for keyword in body_keywords):
+            specs.append(self._body_metric_spec(lowered))
+        return specs
+
+    def _meal_spec(self, text: str, has_image: bool) -> ExtractionActionSpec:
+        meal_type = "unknown"
+        if "早餐" in text or "breakfast" in text:
+            meal_type = "breakfast"
+        elif "午餐" in text or "lunch" in text:
+            meal_type = "lunch"
+        elif "晚餐" in text or "dinner" in text:
+            meal_type = "dinner"
+        elif "加餐" in text or "snack" in text:
+            meal_type = "snack"
+
+        confidence = Decimal("0.45") if has_image else Decimal("0.50")
+        return ExtractionActionSpec(
+            action_type="create_meal_record",
+            confidence=confidence,
+            draft_payload={
+                "recorded_at": self._now_iso(),
+                "source_type": "photo" if has_image else "text",
+                "meal_type": meal_type,
+                "items": [
+                    {
+                        "name": "待确认食物",
+                        "portion_text": "待确认",
+                        "confidence": 0.3,
+                        "user_corrected": False,
+                    }
+                ],
+                "confidence": float(confidence),
+            },
+            warnings=[
+                {
+                    "field": "items",
+                    "reason": "mock_extraction_requires_user_confirmation",
+                }
+            ],
+        )
+
+    def _body_metric_spec(self, text: str) -> ExtractionActionSpec:
+        weight_kg = self._extract_weight_kg(text)
+        confidence = Decimal("0.65") if weight_kg is not None else Decimal("0.35")
+        draft_payload: dict[str, Any] = {
+            "recorded_at": self._now_iso(),
+            "source_type": "text",
+            "confidence": float(confidence),
+        }
+        warnings = []
+        if weight_kg is not None:
+            draft_payload["weight_kg"] = weight_kg
+        else:
+            warnings.append({"field": "weight_kg", "reason": "missing_or_low_confidence"})
+
+        return ExtractionActionSpec(
+            action_type="create_body_metric_record",
+            confidence=confidence,
+            draft_payload=draft_payload,
+            warnings=warnings,
+        )
+
+    def _assistant_text(self, action_specs: list[ExtractionActionSpec]) -> str:
+        if len(action_specs) == 1 and action_specs[0].action_type == "create_meal_record":
+            return "我先整理成一条餐食记录草稿，请确认或修改后再保存。"
+        if (
+            len(action_specs) == 1
+            and action_specs[0].action_type == "create_body_metric_record"
+        ):
+            return "我先整理成一条身体指标草稿，请确认或修改后再保存。"
+        return "我整理出了几个待确认动作，请逐项确认或修改后再保存。"
+
+    def _joined_text(self, content: list[MessageContentItem]) -> str:
+        return " ".join(item.text or "" for item in content if item.type == "text").strip()
+
+    def _extract_weight_kg(self, text: str) -> float | None:
+        kg_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:kg|公斤)", text, flags=re.IGNORECASE)
+        if kg_match:
+            return float(kg_match.group(1))
+        jin_match = re.search(r"(\d+(?:\.\d+)?)\s*斤", text)
+        if jin_match:
+            return float(jin_match.group(1)) / 2
+        return None
+
+    def _is_out_of_scope(self, text: str) -> bool:
+        risky_keywords = ("诊断", "治疗", "处方", "糖尿病", "高血压", "疾病", "用药")
+        return any(keyword in text for keyword in risky_keywords)
+
+    def _now_iso(self) -> str:
+        return datetime.now(UTC).astimezone().isoformat()

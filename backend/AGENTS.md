@@ -62,6 +62,14 @@ Do not introduce a Java backend in V1.
   - `ResponseComposer`
 - Do not introduce LangChain, LangGraph, or Deep Agents unless the architecture document is explicitly changed.
 - Model providers must be replaceable through adapters.
+- V1 text LLM provider is Alibaba Cloud Bailian / DashScope through the OpenAI-compatible API.
+- LLM structured output must follow `../docs/ai-extraction-schema-v1.md`.
+- Keep `AI_PROVIDER=mock` as the default for tests and local development unless explicitly testing Bailian.
+- Build model context through `ConversationContextBuilder`; do not send full conversation history to the model.
+- Treat `conversation_summaries` as rolling context only, not as formal user facts.
+- Run multimodal message parts through `InputNormalizer` before extraction.
+- Keep ASR and image understanding behind replaceable adapters; `mock` providers must not pretend to read media content.
+- DashScope recording-file ASR requires server-accessible audio URLs; do not treat `client_local` audio as readable by the backend.
 
 ## Testing
 

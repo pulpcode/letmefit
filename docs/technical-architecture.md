@@ -238,6 +238,19 @@ V1 至少需要三类模型能力：
 
 推荐把模型适配层做成 provider 接口，不把业务逻辑绑定到某一家模型厂商。
 
+V1 文本 LLM 默认接入阿里云百炼 / DashScope，使用 OpenAI 兼容接口：
+
+```text
+https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+后端通过 `AI_PROVIDER` 切换 provider：
+
+- `mock`：本地开发和测试默认值，不调用外部模型
+- `bailian`：调用百炼 OpenAI-compatible Chat Completions
+
+LLM 结构化输出必须遵循 `docs/ai-extraction-schema-v1.md`。模型输出只能生成 `agent_pending_actions`，不能直接写入正式记录。
+
 V1 不要求准备 TTS 文本转语音模型。除非产品明确要“Agent 语音回复”，否则先只做语音输入，输出仍以文本和对话式确认卡片为主。
 
 ### 7.3 MiniMax 判断
@@ -267,7 +280,23 @@ V1 先自研轻量编排层：
 InputNormalizer -> IntentRouter -> ExtractionService -> RuleEngine -> ResponseComposer
 ```
 
-上下文由后端 `ContextBuilder` 动态组装，不等于把数据库中的全量消息都塞给模型。每次调用模型时只取当前消息、当前待确认动作、最近若干条消息、滚动摘要、用户档案、今日正式记录、相关用户记忆和安全规则。原始消息用于 UI 展示和审计，较早消息压缩到 `conversation_summaries`，正式事实仍以档案和记录表为准。
+当前 `InputNormalizer` 已作为后端内部 adapter 层接入会话消息发送流程：
+
+- 文本 part 原样进入 extraction provider。
+- 音频 part 进入 ASR adapter；默认 `mock` 只返回未处理状态和警告，不生成假转写。
+- 图片 part 进入图片理解 adapter；默认 `mock` 只返回未处理状态和警告，不生成假识别内容。
+- 真实 ASR 或图片理解模型接入后，应通过同一 adapter 输出转写文本或图片描述，再与原始消息、上下文一起交给 extraction provider。
+
+ASR 第一版真实 provider 使用百炼/DashScope Paraformer 录音文件识别 REST API，配置为 `ASR_PROVIDER=dashscope_recording`。由于该接口要求音频文件 URL 可被服务端公网访问，成本敏感测试阶段的 `client_local` 音频不会被后端直接识别；需要识别时，客户端应上传临时文件或提供对象存储临时 URL。
+
+上下文由后端 `ContextBuilder` 动态组装，不等于把数据库中的全量消息都塞给模型。每次调用模型时只取当前消息、当前待确认动作、最近若干条消息、滚动摘要、用户档案、最近正式记录、相关用户记忆和安全规则。原始消息用于 UI 展示和审计，较早消息压缩到 `conversation_summaries`，正式事实仍以档案和记录表为准。
+
+当前后端实现采用滚动摘要策略：
+
+- `ConversationContextBuilder` 在调用 extraction provider 前组装上下文。
+- `ConversationSummaryService` 在消息数量超过阈值后，将较早消息压缩为新的 `conversation_summaries` 记录。
+- 摘要文本明确标注“正式事实以档案和记录表为准”，避免把未确认对话内容当作事实。
+- 默认上下文保留最近 8 条消息，超过 16 条未压缩消息后触发压缩；阈值可通过环境变量调整。
 
 当出现长流程、多工具、多轮任务恢复、人工审批节点或复杂记忆系统时，再评估 LangGraph。Deep Agents 暂不纳入 V1。
 
@@ -300,10 +329,13 @@ iOS App 与微信小程序都在产品规划内，但 V1 不并行实现两个�
 
 ## 10. 部署架构
 
-你的当前云服务器为腾讯云 4 核 4G。V1 初期不强制引入 Nginx。默认部署方式为：FastAPI 后端直接运行在宿主机，由 uv 管理 Python 环境并由 systemd 守护；MySQL 和 Redis 使用 Docker Compose 部署，并只绑定到 `127.0.0.1`。
+你的当前云服务器为腾讯云 4 核 4G，公网 IP 为 `49.232.156.14`，域名为 `www.letmefit.cloud`，并且已申请 SSL 证书。进入域名 HTTPS 测试阶段后，推荐引入 Nginx 作为 HTTPS 终止和反向代理。默认部署方式为：FastAPI 后端直接运行在宿主机，由 uv 管理 Python 环境并由 systemd 守护；MySQL 和 Redis 使用 Docker Compose 部署，并只绑定到 `127.0.0.1`。
 
 ```text
 云服务器
+  Nginx
+    HTTPS 443，域名 www.letmefit.cloud
+    反向代理到 127.0.0.1:8000
   systemd
     FastAPI 后端，监听 127.0.0.1:8000
   Docker Compose
@@ -319,7 +351,7 @@ Nginx 是否引入按阶段判断：
 - 需要正式域名、HTTPS 证书、反向代理、请求体大小控制、访问日志或静态资源代理时：引入 Nginx
 - 如果使用腾讯云负载均衡或其他网关完成 HTTPS 终止，也可以不在云服务器内运行 Nginx
 
-4 核 4G 机器运行 Nginx 没有明显资源压力，是否引入主要取决于运维复杂度，而不是机器规格。V1 公开测试前建议至少具备一种 HTTPS 终止方案：Nginx、Caddy 或腾讯云负载均衡。
+4 核 4G 机器运行 Nginx 没有明显资源压力。当前已有域名和 SSL 证书，因此 V1 服务器测试阶段采用 Nginx 是更清晰的方案。部署细节见 `docs/backend-deployment-tencent-cloud.md`。
 
 媒体文件存储按阶段选择：本地开发可用服务端本地存储；成本敏感的服务器测试可让 App 保留图片/音频原始文件在本地，后端只保存客户端本地引用与结构化结果；公开测试或生产建议使用腾讯云 COS 等对象存储。短信验证码使用阿里云号码认证服务。若进入公开测试，应将数据库迁移到托管数据库或至少独立磁盘和备份策略。
 

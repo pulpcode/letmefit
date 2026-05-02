@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LetMeFit API Test</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fa;
+        --panel: #ffffff;
+        --text: #18202a;
+        --muted: #5d6a78;
+        --line: #d9dee6;
+        --primary: #1769e0;
+        --primary-dark: #1051af;
+        --danger: #b42318;
+        --ok: #157f3b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      header {
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      main,
+      .bar {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+      }
+
+      .bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 68px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: 1fr 380px;
+        gap: 16px;
+        padding: 18px 0 28px;
+      }
+
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 16px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 16px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 9px 10px;
+        color: var(--text);
+        background: #fff;
+        font: inherit;
+      }
+
+      textarea {
+        min-height: 92px;
+        resize: vertical;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 9px 12px;
+        color: #fff;
+        background: var(--primary);
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--primary-dark);
+      }
+
+      button.secondary {
+        color: var(--text);
+        background: #eef2f7;
+      }
+
+      button.secondary:hover {
+        background: #e3e8ef;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 10px;
+        color: var(--muted);
+        background: #fff;
+      }
+
+      .pill.ok {
+        color: var(--ok);
+      }
+
+      .pill.warn {
+        color: var(--danger);
+      }
+
+      pre {
+        min-height: 420px;
+        max-height: 720px;
+        margin: 0;
+        overflow: auto;
+        border-radius: 8px;
+        padding: 12px;
+        color: #dce7f7;
+        background: #111827;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .state {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .state code {
+        color: var(--muted);
+        word-break: break-all;
+      }
+
+      @media (max-width: 920px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="bar">
+        <div>
+          <h1>LetMeFit API Test</h1>
+          <div class="pill" id="statusPill">未连接</div>
+        </div>
+        <button class="secondary" id="clearState">清空本地状态</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="stack">
+        <section>
+          <h2>连接</h2>
+          <div class="grid">
+            <label>
+              API Base
+              <input id="apiBase" value="/v1" />
+            </label>
+            <label>
+              手机号
+              <input id="phone" value="13800138000" />
+            </label>
+          </div>
+          <div class="actions">
+            <button id="health">健康检查</button>
+            <button id="sendSms">发送验证码</button>
+            <button id="verifySms">验证码登录</button>
+          </div>
+          <div class="grid" style="margin-top: 12px">
+            <label>
+              验证码
+              <input id="code" value="123456" />
+            </label>
+            <label>
+              Refresh Token
+              <input id="refreshToken" />
+            </label>
+          </div>
+          <div class="actions">
+            <button class="secondary" id="refreshAccess">刷新 Access Token</button>
+            <button class="secondary" id="logout">退出登录</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>档案</h2>
+          <div class="grid">
+            <label>
+              年龄
+              <input id="age" type="number" value="30" />
+            </label>
+            <label>
+              性别
+              <select id="sex">
+                <option value="male">male</option>
+                <option value="female">female</option>
+                <option value="unknown">unknown</option>
+              </select>
+            </label>
+            <label>
+              身高 cm
+              <input id="heightCm" type="number" value="175" />
+            </label>
+            <label>
+              当前体重 kg
+              <input id="currentWeightKg" type="number" step="0.1" value="72.4" />
+            </label>
+            <label>
+              目标体重 kg
+              <input id="targetWeightKg" type="number" step="0.1" value="68" />
+            </label>
+            <label>
+              目标
+              <select id="goalType">
+                <option value="fat_loss">fat_loss</option>
+                <option value="muscle_gain">muscle_gain</option>
+                <option value="maintenance">maintenance</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions">
+            <button id="getProfile">读取档案</button>
+            <button id="saveProfile">保存档案</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>会话与确认</h2>
+          <div class="grid">
+            <label>
+              会话标题
+              <input id="conversationTitle" value="本机测试" />
+            </label>
+            <label>
+              Conversation ID
+              <input id="conversationId" />
+            </label>
+          </div>
+          <label style="margin-top: 12px">
+            消息
+            <textarea id="messageText">今天午餐吃了鸡胸肉和一碗米饭，体重72.4公斤</textarea>
+          </label>
+          <div class="grid" style="margin-top: 12px">
+            <label>
+              Pending Action ID
+              <input id="pendingActionId" />
+            </label>
+            <label>
+              查询日期
+              <input id="recordDate" type="date" />
+            </label>
+          </div>
+          <div class="actions">
+            <button id="createConversation">创建会话</button>
+            <button id="sendMessage">发送消息</button>
+            <button class="secondary" id="listPending">查询待确认动作</button>
+            <button id="confirmPending">确认动作</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>记录查询</h2>
+          <div class="actions">
+            <button class="secondary" id="listMeals">查询餐食</button>
+            <button class="secondary" id="listBodyMetrics">查询身体指标</button>
+            <button class="secondary" id="refreshArchive">查询每日归档</button>
+            <button class="secondary" id="generateSummary">生成每日总结</button>
+          </div>
+        </section>
+      </div>
+
+      <section>
+        <h2>状态与响应</h2>
+        <div class="state">
+          <span>Access Token</span>
+          <code id="accessTokenView">未登录</code>
+        </div>
+        <div class="state">
+          <span>最近响应</span>
+          <pre id="output"></pre>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        accessToken: localStorage.getItem("letmefit_access_token") || "",
+        refreshToken: localStorage.getItem("letmefit_refresh_token") || "",
+      };
+
+      const $ = (id) => document.getElementById(id);
+
+      function today() {
+        return new Date().toISOString().slice(0, 10);
+      }
+
+      function updateState() {
+        $("accessTokenView").textContent = state.accessToken || "未登录";
+        $("refreshToken").value = state.refreshToken;
+        $("statusPill").textContent = state.accessToken ? "已登录" : "未登录";
+        $("statusPill").className = `pill ${state.accessToken ? "ok" : "warn"}`;
+      }
+
+      function saveTokens(data) {
+        if (data.access_token) {
+          state.accessToken = data.access_token;
+          localStorage.setItem("letmefit_access_token", state.accessToken);
+        }
+        if (data.refresh_token) {
+          state.refreshToken = data.refresh_token;
+          localStorage.setItem("letmefit_refresh_token", state.refreshToken);
+        }
+        updateState();
+      }
+
+      function log(value) {
+        $("output").textContent = JSON.stringify(value, null, 2);
+      }
+
+      function apiBase() {
+        return $("apiBase").value.replace(/\/$/, "");
+      }
+
+      async function api(path, options = {}) {
+        const headers = { "Content-Type": "application/json" };
+        if (options.auth !== false && state.accessToken) {
+          headers.Authorization = `Bearer ${state.accessToken}`;
+        }
+        const response = await fetch(`${apiBase()}${path}`, {
+          method: options.method || "GET",
+          headers,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw { status: response.status, body };
+        }
+        return body;
+      }
+
+      async function run(fn) {
+        try {
+          const result = await fn();
+          log(result);
+          return result;
+        } catch (error) {
+          log(error);
+          return null;
+        }
+      }
+
+      $("health").onclick = () => run(() => api("/health", { auth: false }));
+
+      $("sendSms").onclick = () =>
+        run(() =>
+          api("/auth/sms/send", {
+            method: "POST",
+            auth: false,
+            body: { phone_number: $("phone").value, purpose: "login" },
+          }),
+        );
+
+      $("verifySms").onclick = () =>
+        run(async () => {
+          const response = await api("/auth/sms/verify", {
+            method: "POST",
+            auth: false,
+            body: { phone_number: $("phone").value, code: $("code").value },
+          });
+          saveTokens(response.data);
+          return response;
+        });
+
+      $("refreshAccess").onclick = () =>
+        run(async () => {
+          const response = await api("/auth/refresh", {
+            method: "POST",
+            auth: false,
+            body: { refresh_token: $("refreshToken").value || state.refreshToken },
+          });
+          saveTokens(response.data);
+          return response;
+        });
+
+      $("logout").onclick = () =>
+        run(async () => {
+          const response = await api("/auth/logout", {
+            method: "POST",
+            auth: false,
+            body: { refresh_token: $("refreshToken").value || state.refreshToken },
+          });
+          state.accessToken = "";
+          state.refreshToken = "";
+          localStorage.removeItem("letmefit_access_token");
+          localStorage.removeItem("letmefit_refresh_token");
+          updateState();
+          return response;
+        });
+
+      $("getProfile").onclick = () => run(() => api("/profile"));
+
+      $("saveProfile").onclick = () =>
+        run(() =>
+          api("/profile", {
+            method: "PUT",
+            body: {
+              age: Number($("age").value),
+              sex: $("sex").value,
+              height_cm: Number($("heightCm").value),
+              current_weight_kg: Number($("currentWeightKg").value),
+              target_weight_kg: Number($("targetWeightKg").value),
+              activity_level: "moderate",
+              goal_type: $("goalType").value,
+            },
+          }),
+        );
+
+      $("createConversation").onclick = () =>
+        run(async () => {
+          const response = await api("/conversations", {
+            method: "POST",
+            body: { title: $("conversationTitle").value },
+          });
+          $("conversationId").value = response.data.conversation_id;
+          return response;
+        });
+
+      $("sendMessage").onclick = () =>
+        run(async () => {
+          const conversationId = $("conversationId").value;
+          const response = await api(`/conversations/${conversationId}/messages`, {
+            method: "POST",
+            body: { content: [{ type: "text", text: $("messageText").value }] },
+          });
+          const action = response.data.pending_actions?.[0];
+          if (action) {
+            $("pendingActionId").value = action.pending_action_id;
+          }
+          return response;
+        });
+
+      $("listPending").onclick = () =>
+        run(() => api(`/conversations/${$("conversationId").value}/pending-actions`));
+
+      $("confirmPending").onclick = () =>
+        run(() =>
+          api(`/agent/pending-actions/${$("pendingActionId").value}/confirm`, {
+            method: "POST",
+          }),
+        );
+
+      $("listMeals").onclick = () => run(() => api(`/meals?date=${$("recordDate").value}`));
+      $("listBodyMetrics").onclick = () =>
+        run(() =>
+          api(
+            `/body-metrics?date_from=${$("recordDate").value}&date_to=${$("recordDate").value}`,
+          ),
+        );
+
+      $("refreshArchive").onclick = () =>
+        run(() => api(`/daily-archives/${$("recordDate").value}`));
+
+      $("generateSummary").onclick = () =>
+        run(() =>
+          api("/summaries/generate", {
+            method: "POST",
+            body: { date: $("recordDate").value, timezone: "Asia/Shanghai" },
+          }),
+        );
+
+      $("clearState").onclick = () => {
+        state.accessToken = "";
+        state.refreshToken = "";
+        localStorage.removeItem("letmefit_access_token");
+        localStorage.removeItem("letmefit_refresh_token");
+        updateState();
+        log({ cleared: true });
+      };
+
+      $("recordDate").value = today();
+      updateState();
+    </script>
+  </body>
+</html>

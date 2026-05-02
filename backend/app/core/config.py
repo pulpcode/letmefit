@@ -39,6 +39,29 @@ class Settings(BaseSettings):
     aliyun_sms_sign_name: str = ""
     aliyun_sms_template_code: str = ""
 
+    ai_provider: str = "mock"
+    ai_timeout_seconds: int = 30
+    ai_max_retries: int = 2
+    ai_schema_repair_retries: int = 1
+    ai_temperature: float = 0.1
+    conversation_context_recent_messages: int = 8
+    conversation_summary_trigger_messages: int = 16
+    conversation_summary_max_chars: int = 2000
+    asr_provider: str = "mock"
+    vision_provider: str = "mock"
+    dashscope_asr_endpoint: str = (
+        "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription"
+    )
+    dashscope_task_endpoint: str = "https://dashscope.aliyuncs.com/api/v1/tasks"
+    dashscope_asr_model: str = "paraformer-v2"
+    dashscope_asr_language_hints: str = "zh,en"
+    dashscope_asr_poll_interval_seconds: float = 0.5
+    dashscope_asr_max_wait_seconds: int = 20
+    bailian_api_key: str = ""
+    dashscope_api_key: str = ""
+    bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    bailian_model: str = "qwen-plus"
+
 
 @lru_cache
 def get_settings() -> Settings:

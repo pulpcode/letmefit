@@ -118,6 +118,15 @@ class AuthService:
             request=request,
         )
 
+        if not result.success and result.result_code != "OK":
+            self.db.commit()
+            raise AppError(
+                "INTERNAL_ERROR",
+                "短信验证码校验失败",
+                status_code=502,
+                details={"provider_code": result.result_code},
+            )
+
         if not result.success:
             self._track_failed_attempt(phone_hash)
             self.db.commit()

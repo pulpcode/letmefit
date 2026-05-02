@@ -85,7 +85,7 @@ def _body_metric_content() -> str:
 
 def test_get_extraction_provider_defaults_to_mock() -> None:
     provider = get_extraction_provider(
-        Settings(jwt_secret_key="test-secret-key-with-enough-length")
+        Settings(jwt_secret_key="test-secret-key-with-enough-length", ai_provider="mock")
     )
 
     assert isinstance(provider, MockExtractionProvider)

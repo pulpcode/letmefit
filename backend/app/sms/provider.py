@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from alibabacloud_dypnsapi20170525 import models as dypns_models
 from alibabacloud_dypnsapi20170525.client import Client as DypnsClient
 from alibabacloud_tea_openapi import models as openapi_models
+from alibabacloud_tea_openapi.exceptions import AlibabaCloudException
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
@@ -100,7 +101,10 @@ class AliyunSmsProvider(SmsProvider):
             duplicate_policy=1,
             return_verify_code=False,
         )
-        body = self._get_client().send_sms_verify_code(request).body
+        try:
+            body = self._get_client().send_sms_verify_code(request).body
+        except AlibabaCloudException as exc:
+            return self._provider_error_send_result(exc)
         return SmsSendResult(
             success=bool(body.success and body.code == "OK"),
             result_code=body.code or "UNKNOWN",
@@ -115,13 +119,32 @@ class AliyunSmsProvider(SmsProvider):
             scheme_name=self.settings.aliyun_sms_scheme_name or None,
             verify_code=code,
         )
-        body = self._get_client().check_sms_verify_code(request).body
+        try:
+            body = self._get_client().check_sms_verify_code(request).body
+        except AlibabaCloudException as exc:
+            return self._provider_error_check_result(exc)
         verify_result = body.model.verify_result if body.model else "UNKNOWN"
         return SmsCheckResult(
             success=bool(body.success and body.code == "OK" and verify_result == "PASS"),
             verify_result=verify_result,
             result_code=body.code or "UNKNOWN",
             message=body.message,
+        )
+
+    def _provider_error_send_result(self, exc: AlibabaCloudException) -> SmsSendResult:
+        return SmsSendResult(
+            success=False,
+            result_code=exc.code or "ALIYUN_PROVIDER_ERROR",
+            provider_request_id=exc.request_id,
+            message=exc.message,
+        )
+
+    def _provider_error_check_result(self, exc: AlibabaCloudException) -> SmsCheckResult:
+        return SmsCheckResult(
+            success=False,
+            verify_result="ERROR",
+            result_code=exc.code or "ALIYUN_PROVIDER_ERROR",
+            message=exc.message,
         )
 
 

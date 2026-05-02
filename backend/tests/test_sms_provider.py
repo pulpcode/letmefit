@@ -1,4 +1,5 @@
 import pytest
+from alibabacloud_tea_openapi.exceptions import ClientException
 
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -46,3 +47,59 @@ def test_aliyun_sms_provider_requires_credentials() -> None:
 
     assert exc_info.value.code == "INTERNAL_ERROR"
     assert "ALIYUN_ACCESS_KEY_ID" in exc_info.value.details["missing"]
+
+
+class FakeAliyunClient:
+    def send_sms_verify_code(self, request):
+        raise ClientException(
+            status_code=403,
+            code="Forbidden.NoPermission",
+            message="You are not authorized to perform this action.",
+            request_id="req_aliyun",
+        )
+
+    def check_sms_verify_code(self, request):
+        raise ClientException(
+            status_code=403,
+            code="Forbidden.NoPermission",
+            message="You are not authorized to perform this action.",
+            request_id="req_aliyun",
+        )
+
+
+def test_aliyun_sms_provider_returns_structured_send_error() -> None:
+    provider = AliyunSmsProvider(
+        Settings(
+            jwt_secret_key="test-secret-key-with-enough-length",
+            aliyun_access_key_id="ak",
+            aliyun_access_key_secret="secret",
+            aliyun_sms_sign_name="sign",
+            aliyun_sms_template_code="template",
+        )
+    )
+    provider._client = FakeAliyunClient()
+
+    result = provider.send_code("13800138000", "86")
+
+    assert result.success is False
+    assert result.result_code == "Forbidden.NoPermission"
+    assert result.provider_request_id == "req_aliyun"
+
+
+def test_aliyun_sms_provider_returns_structured_check_error() -> None:
+    provider = AliyunSmsProvider(
+        Settings(
+            jwt_secret_key="test-secret-key-with-enough-length",
+            aliyun_access_key_id="ak",
+            aliyun_access_key_secret="secret",
+            aliyun_sms_sign_name="sign",
+            aliyun_sms_template_code="template",
+        )
+    )
+    provider._client = FakeAliyunClient()
+
+    result = provider.check_code("13800138000", "86", "123456")
+
+    assert result.success is False
+    assert result.verify_result == "ERROR"
+    assert result.result_code == "Forbidden.NoPermission"

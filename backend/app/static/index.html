@@ -311,6 +311,7 @@
             <button id="sendMessage">发送消息</button>
             <button class="secondary" id="listPending">查询待确认动作</button>
             <button id="confirmPending">确认动作</button>
+            <button id="confirmAllPending">确认全部待确认动作</button>
           </div>
         </section>
 
@@ -496,7 +497,16 @@
         });
 
       $("listPending").onclick = () =>
-        run(() => api(`/conversations/${$("conversationId").value}/pending-actions`));
+        run(async () => {
+          const response = await api(`/conversations/${$("conversationId").value}/pending-actions`);
+          const pending = response.data.pending_actions?.find(
+            (action) => action.status === "pending_confirmation",
+          );
+          if (pending) {
+            $("pendingActionId").value = pending.pending_action_id;
+          }
+          return response;
+        });
 
       $("confirmPending").onclick = () =>
         run(() =>
@@ -504,6 +514,25 @@
             method: "POST",
           }),
         );
+
+      $("confirmAllPending").onclick = () =>
+        run(async () => {
+          const pendingResponse = await api(
+            `/conversations/${$("conversationId").value}/pending-actions`,
+          );
+          const pendingActions = (pendingResponse.data.pending_actions || []).filter(
+            (action) => action.status === "pending_confirmation",
+          );
+          const confirmed = [];
+          for (const action of pendingActions) {
+            const response = await api(
+              `/agent/pending-actions/${action.pending_action_id}/confirm`,
+              { method: "POST" },
+            );
+            confirmed.push(response.data);
+          }
+          return { pending_count: pendingActions.length, confirmed };
+        });
 
       $("listMeals").onclick = () => run(() => api(`/meals?date=${$("recordDate").value}`));
       $("listBodyMetrics").onclick = () =>

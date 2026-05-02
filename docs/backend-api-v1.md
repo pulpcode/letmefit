@@ -501,15 +501,43 @@ date_to=2026-05-01
 
 获取某天的归档数据。
 
+当前实现会在读取时按正式记录重新计算归档缓存。
+
+响应：
+
+```json
+{
+  "data": {
+    "archive": {
+      "id": "archive_...",
+      "date": "2026-05-01",
+      "timezone": "Asia/Shanghai",
+      "meal_count": 3,
+      "body_metric_count": 1,
+      "calorie_total": 1620,
+      "protein_total_g": 96,
+      "carbs_total_g": 180,
+      "fat_total_g": 48,
+      "completeness_score": 1,
+      "last_calculated_at": "2026-05-01T23:59:00"
+    }
+  },
+  "request_id": "req_..."
+}
+```
+
 ### POST /summaries/generate
 
 生成或刷新每日总结。
+
+V1 第一阶段使用本地规则生成总结，后续可替换为 LLM adapter。
 
 请求：
 
 ```json
 {
-  "date": "2026-05-01"
+  "date": "2026-05-01",
+  "timezone": "Asia/Shanghai"
 }
 ```
 
@@ -518,15 +546,23 @@ date_to=2026-05-01
 ```json
 {
   "data": {
-    "date": "2026-05-01",
-    "calorie_total": 1620,
-    "protein_total_g": 96,
-    "summary_text": "今天记录较完整，蛋白质摄入不错。",
-    "suggestions": [
-      "晚餐可以优先选择高蛋白、低油烹饪方式。",
-      "如果还觉得饿，优先补充蔬菜或无糖酸奶。"
-    ],
-    "completeness_score": 0.8
+    "summary": {
+      "id": "summary_...",
+      "date": "2026-05-01",
+      "archive_id": "archive_...",
+      "calorie_total": 1620,
+      "protein_total_g": 96,
+      "carbs_total_g": 180,
+      "fat_total_g": 48,
+      "meal_count": 3,
+      "body_metric_count": 1,
+      "summary_text": "今天记录了 3 条餐食，总热量约 1620 kcal，蛋白质约 96 g，身体指标 1 条。",
+      "suggestions": [
+        "今天记录较完整，后续可以继续保持相同记录节奏。"
+      ],
+      "completeness_score": 1,
+      "generation_status": "generated"
+    }
   },
   "request_id": "req_..."
 }

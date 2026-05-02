@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.ai.draft_normalizer import normalize_pending_action_draft
 from app.ai.providers import ExtractionProvider, get_extraction_provider
 from app.ai.types import ExtractionInput, ExtractionProviderResult
 from app.auth.security import new_id, utc_now
@@ -89,7 +90,10 @@ class ExtractionService:
             extraction_id=extraction_id,
             action_type=action_spec.action_type,
             status="pending_confirmation",
-            draft_payload_json=action_spec.draft_payload,
+            draft_payload_json=normalize_pending_action_draft(
+                action_spec.action_type,
+                action_spec.draft_payload,
+            ),
             warnings_json=action_spec.warnings,
             confidence=action_spec.confidence or provider_result.confidence or Decimal("0"),
         )

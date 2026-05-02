@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai.draft_normalizer import normalize_pending_action_draft
 from app.auth.security import utc_now
 from app.core.database import get_db
 from app.core.errors import AppError
@@ -114,7 +115,10 @@ class PendingActionService:
         return BodyMetricService(self.db).create_body_metric(user_id, payload)
 
     def _draft_with_source(self, action: AgentPendingAction) -> dict[str, Any]:
-        draft_payload = dict(action.draft_payload_json)
+        draft_payload = normalize_pending_action_draft(
+            action.action_type,
+            action.draft_payload_json,
+        )
         draft_payload["source_pending_action_id"] = action.id
         return draft_payload
 

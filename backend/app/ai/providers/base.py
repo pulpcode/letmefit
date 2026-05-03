@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 from app.ai.types import ExtractionInput, ExtractionProviderResult
 from app.core.config import Settings, get_settings
@@ -11,6 +12,12 @@ class ExtractionProvider(ABC):
     @abstractmethod
     def extract(self, payload: ExtractionInput) -> ExtractionProviderResult:
         raise NotImplementedError
+
+    def debug_request_body(self, payload: ExtractionInput) -> dict[str, Any] | None:
+        return None
+
+    def last_debug_request_body(self) -> dict[str, Any] | None:
+        return None
 
 
 def get_extraction_provider(settings: Settings | None = None) -> ExtractionProvider:

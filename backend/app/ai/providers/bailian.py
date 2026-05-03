@@ -56,6 +56,7 @@ class BailianExtractionProvider(ExtractionProvider):
 
     def __init__(self, settings: Settings | None = None, client: OpenAI | None = None) -> None:
         self.settings = settings or get_settings()
+        self._last_debug_request_body: dict[str, Any] | None = None
         api_key = self.settings.bailian_api_key or self.settings.dashscope_api_key
         if not api_key:
             raise AppError(
@@ -72,16 +73,15 @@ class BailianExtractionProvider(ExtractionProvider):
         )
 
     def extract(self, payload: ExtractionInput) -> ExtractionProviderResult:
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": self._user_prompt(payload)},
-        ]
+        messages = self._messages(payload)
         attempts = max(1, self.settings.ai_schema_repair_retries + 1)
         last_reason = "unknown"
         validation_errors: list[dict[str, Any]] = []
 
         for attempt_index in range(attempts):
-            content = self._complete(messages)
+            request_body = self._request_body(messages)
+            self._last_debug_request_body = request_body
+            content = self._complete(request_body)
             try:
                 return self._parse_and_validate(content)
             except BailianOutputError as exc:
@@ -109,14 +109,9 @@ class BailianExtractionProvider(ExtractionProvider):
             details=details,
         )
 
-    def _complete(self, messages: list[dict[str, str]]) -> str:
+    def _complete(self, request_body: dict[str, Any]) -> str:
         try:
-            completion = self.client.chat.completions.create(
-                model=self.settings.bailian_model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=self.settings.ai_temperature,
-            )
+            completion = self.client.chat.completions.create(**request_body)
         except OpenAIError as exc:
             raise AppError(
                 "AI_EXTRACTION_FAILED",
@@ -129,6 +124,26 @@ class BailianExtractionProvider(ExtractionProvider):
         if not isinstance(content, str) or not content:
             raise BailianOutputError("empty_response")
         return content
+
+    def debug_request_body(self, payload: ExtractionInput) -> dict[str, Any]:
+        return self._request_body(self._messages(payload))
+
+    def last_debug_request_body(self) -> dict[str, Any] | None:
+        return self._last_debug_request_body
+
+    def _request_body(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+        return {
+            "model": self.settings.bailian_model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": self.settings.ai_temperature,
+        }
+
+    def _messages(self, payload: ExtractionInput) -> list[dict[str, str]]:
+        return [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": self._user_prompt(payload)},
+        ]
 
     def _user_prompt(self, payload: ExtractionInput) -> str:
         request = build_extraction_user_prompt_payload(payload)

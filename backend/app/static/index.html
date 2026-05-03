@@ -393,12 +393,12 @@
           </div>
         </div>
         <div class="state">
-          <span>LLM 请求体</span>
-          <pre id="llmRequestOutput"></pre>
-        </div>
-        <div class="state">
           <span>响应</span>
           <pre id="responseOutput"></pre>
+        </div>
+        <div class="state">
+          <span>LLM 请求 body</span>
+          <pre id="llmRequestOutput"></pre>
         </div>
       </section>
     </main>
@@ -467,30 +467,30 @@
       }
 
       function log(value) {
-        $("llmRequestOutput").textContent = JSON.stringify(extractLlmRequest(value), null, 2);
         $("responseOutput").textContent = JSON.stringify(withoutDebugContext(value), null, 2);
+        $("llmRequestOutput").textContent = JSON.stringify(extractLlmRequestBody(value), null, 2);
       }
 
-      function extractLlmRequest(value) {
-        const payload = findLlmPromptPayload(value);
-        if (payload) {
-          return payload;
+      function extractLlmRequestBody(value) {
+        const requestBody = findLlmRequestBody(value);
+        if (requestBody) {
+          return requestBody;
         }
         return {
-          note: "本次响应没有 debug_context.llm_user_prompt_payload。发送消息并勾选“显示 LLM 上下文”后会显示。",
+          note: "本次响应没有 debug_context.llm_request_body。发送消息并勾选“显示 LLM 上下文”后会显示。",
         };
       }
 
-      function findLlmPromptPayload(value) {
+      function findLlmRequestBody(value) {
         if (!value || typeof value !== "object") {
           return null;
         }
-        if (value.debug_context?.llm_user_prompt_payload) {
-          return value.debug_context.llm_user_prompt_payload;
+        if (value.debug_context?.llm_request_body) {
+          return value.debug_context.llm_request_body;
         }
         if (Array.isArray(value)) {
           for (const item of value) {
-            const found = findLlmPromptPayload(item);
+            const found = findLlmRequestBody(item);
             if (found) {
               return found;
             }
@@ -498,7 +498,7 @@
           return null;
         }
         for (const item of Object.values(value)) {
-          const found = findLlmPromptPayload(item);
+          const found = findLlmRequestBody(item);
           if (found) {
             return found;
           }

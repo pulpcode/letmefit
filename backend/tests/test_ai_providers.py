@@ -169,6 +169,27 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     )
 
 
+def test_bailian_debug_request_body_matches_chat_completion_body() -> None:
+    settings = Settings(
+        jwt_secret_key="test-secret-key-with-enough-length",
+        bailian_api_key="sk-test",
+        bailian_model="qwen-plus",
+        ai_temperature=0.2,
+    )
+    provider = BailianExtractionProvider(settings, client=FakeClient(_body_metric_content()))
+
+    body = provider.debug_request_body(_input("今天体重72.4公斤"))
+
+    assert body["model"] == "qwen-plus"
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["temperature"] == 0.2
+    assert body["messages"][0]["role"] == "system"
+    assert body["messages"][1]["role"] == "user"
+    assert json.loads(body["messages"][1]["content"])["message_content"][0]["text"] == (
+        "今天体重72.4公斤"
+    )
+
+
 def test_bailian_provider_repairs_invalid_json_response() -> None:
     client = FakeClient(["not-json", _body_metric_content()])
     settings = Settings(

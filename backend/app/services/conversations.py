@@ -103,16 +103,15 @@ class ConversationService:
             content=normalized_input.content,
             context=context,
         )
-        debug_context = (
-            self._debug_context(extraction_input) if payload.include_debug_context else None
-        )
-
         extraction_result = self.extraction_service.process_message(
             user_id=user_id,
             conversation_id=conversation.id,
             message_id=user_message.id,
             content=extraction_input.content,
             context=context,
+        )
+        debug_context = (
+            self._debug_context(extraction_input) if payload.include_debug_context else None
         )
         assistant_message = ConversationMessage(
             id=new_id("msg"),
@@ -152,6 +151,7 @@ class ConversationService:
             "provider": self.extraction_service.provider.provider_name,
             "normalized_content": normalized_content,
             "conversation_context": extraction_input.context,
+            "llm_request_body": self.extraction_service.provider.last_debug_request_body(),
             "llm_user_prompt_payload": build_extraction_user_prompt_payload(extraction_input),
         }
 

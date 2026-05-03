@@ -39,7 +39,7 @@
 
       main,
       .bar {
-        width: min(1180px, calc(100vw - 32px));
+        width: min(1380px, calc(100vw - 32px));
         margin: 0 auto;
       }
 
@@ -59,7 +59,7 @@
 
       main {
         display: grid;
-        grid-template-columns: 1fr 380px;
+        grid-template-columns: minmax(0, 1fr) minmax(420px, 0.8fr);
         gap: 16px;
         padding: 18px 0 28px;
       }
@@ -174,8 +174,8 @@
       }
 
       pre {
-        min-height: 420px;
-        max-height: 720px;
+        min-height: 300px;
+        max-height: 520px;
         margin: 0;
         overflow: auto;
         border-radius: 8px;
@@ -195,6 +195,11 @@
       .state code {
         color: var(--muted);
         word-break: break-all;
+      }
+
+      .output-stack {
+        display: grid;
+        gap: 16px;
       }
 
       @media (max-width: 920px) {
@@ -379,15 +384,21 @@
         </section>
       </div>
 
-      <section>
-        <h2>状态与响应</h2>
-        <div class="state">
-          <span>Access Token</span>
-          <code id="accessTokenView">未登录</code>
+      <section class="output-stack">
+        <div>
+          <h2>状态</h2>
+          <div class="state">
+            <span>Access Token</span>
+            <code id="accessTokenView">未登录</code>
+          </div>
         </div>
         <div class="state">
-          <span>最近响应</span>
-          <pre id="output"></pre>
+          <span>LLM 请求体</span>
+          <pre id="llmRequestOutput"></pre>
+        </div>
+        <div class="state">
+          <span>响应</span>
+          <pre id="responseOutput"></pre>
         </div>
       </section>
     </main>
@@ -456,7 +467,57 @@
       }
 
       function log(value) {
-        $("output").textContent = JSON.stringify(value, null, 2);
+        $("llmRequestOutput").textContent = JSON.stringify(extractLlmRequest(value), null, 2);
+        $("responseOutput").textContent = JSON.stringify(withoutDebugContext(value), null, 2);
+      }
+
+      function extractLlmRequest(value) {
+        const payload = findLlmPromptPayload(value);
+        if (payload) {
+          return payload;
+        }
+        return {
+          note: "本次响应没有 debug_context.llm_user_prompt_payload。发送消息并勾选“显示 LLM 上下文”后会显示。",
+        };
+      }
+
+      function findLlmPromptPayload(value) {
+        if (!value || typeof value !== "object") {
+          return null;
+        }
+        if (value.debug_context?.llm_user_prompt_payload) {
+          return value.debug_context.llm_user_prompt_payload;
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const found = findLlmPromptPayload(item);
+            if (found) {
+              return found;
+            }
+          }
+          return null;
+        }
+        for (const item of Object.values(value)) {
+          const found = findLlmPromptPayload(item);
+          if (found) {
+            return found;
+          }
+        }
+        return null;
+      }
+
+      function withoutDebugContext(value) {
+        if (!value || typeof value !== "object") {
+          return value;
+        }
+        if (Array.isArray(value)) {
+          return value.map((item) => withoutDebugContext(item));
+        }
+        return Object.fromEntries(
+          Object.entries(value)
+            .filter(([key]) => key !== "debug_context")
+            .map(([key, item]) => [key, withoutDebugContext(item)]),
+        );
       }
 
       function apiBase() {

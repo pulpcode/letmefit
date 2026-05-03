@@ -1,0 +1,176 @@
+.hero {
+  position: relative;
+  height: 280rpx;
+  overflow: hidden;
+  border-radius: 16rpx;
+  background: #e7f5f1;
+}
+
+.hero-bg,
+.hero-mask {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.hero-bg {
+  opacity: 0.28;
+}
+
+.hero-mask {
+  background: linear-gradient(90deg, rgba(247, 251, 250, 0.98), rgba(247, 251, 250, 0.72));
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
+  padding: 38rpx;
+}
+
+.hello {
+  font-size: 44rpx;
+  font-weight: 800;
+  color: #0b6f60;
+}
+
+.date {
+  margin-top: 12rpx;
+  color: #58716c;
+}
+
+.agent {
+  position: absolute;
+  right: 20rpx;
+  bottom: 0;
+  z-index: 1;
+  width: 210rpx;
+  height: 210rpx;
+}
+
+.profile-alert,
+.status,
+.advice {
+  margin-top: 24rpx;
+  padding: 28rpx;
+}
+
+.alert-title {
+  color: #0b6f60;
+  font-weight: 700;
+}
+
+.alert-text {
+  margin-top: 8rpx;
+  color: #7a8b87;
+  font-size: 24rpx;
+}
+
+.status-head,
+.recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mini {
+  min-height: 56rpx;
+  padding: 0 8rpx;
+  font-size: 24rpx;
+}
+
+.stats-grid {
+  margin-top: 24rpx;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12rpx;
+}
+
+.stat {
+  min-width: 0;
+  padding: 18rpx 8rpx;
+  border-radius: 14rpx;
+  background: #f7fbfa;
+  text-align: center;
+}
+
+.value {
+  display: block;
+  color: #18332f;
+  font-size: 34rpx;
+  font-weight: 800;
+}
+
+.label {
+  display: block;
+  margin-top: 8rpx;
+  color: #7a8b87;
+  font-size: 22rpx;
+}
+
+.latest-weight {
+  margin-top: 20rpx;
+  color: #58716c;
+  font-size: 24rpx;
+}
+
+.quick {
+  margin-top: 24rpx;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14rpx;
+}
+
+.quick-btn {
+  min-height: 112rpx;
+  padding: 0 14rpx;
+  border-radius: 16rpx;
+  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.meal {
+  background: #0b8f7a;
+}
+
+.weight {
+  background: #2c80c9;
+}
+
+.agent-btn {
+  background: #f28b45;
+}
+
+.advice-text {
+  margin-top: 18rpx;
+  color: #3f5f59;
+  line-height: 1.6;
+}
+
+.recent {
+  margin-top: 30rpx;
+}
+
+.empty,
+.record {
+  margin-top: 16rpx;
+  padding: 24rpx;
+}
+
+.empty {
+  color: #7a8b87;
+  text-align: center;
+}
+
+.record-title {
+  font-weight: 700;
+  color: #18332f;
+}
+
+.record-sub {
+  margin-top: 8rpx;
+  color: #7a8b87;
+  font-size: 24rpx;
+}
+

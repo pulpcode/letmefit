@@ -1,0 +1,60 @@
+.header {
+  margin-bottom: 24rpx;
+}
+
+.overview {
+  padding: 24rpx;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12rpx;
+}
+
+.metric {
+  min-width: 0;
+  padding: 16rpx 6rpx;
+  border-radius: 14rpx;
+  background: #f7fbfa;
+  text-align: center;
+}
+
+.value {
+  display: block;
+  color: #18332f;
+  font-size: 32rpx;
+  font-weight: 800;
+}
+
+.label {
+  display: block;
+  margin-top: 8rpx;
+  color: #7a8b87;
+  font-size: 22rpx;
+}
+
+.summary-card {
+  margin-top: 24rpx;
+  padding: 28rpx;
+}
+
+.card-title {
+  color: #18332f;
+  font-weight: 700;
+}
+
+.summary-text,
+.suggestion {
+  margin-top: 16rpx;
+  color: #3f5f59;
+  line-height: 1.6;
+}
+
+.suggestion {
+  padding: 18rpx;
+  border-radius: 14rpx;
+  background: #f7fbfa;
+}
+
+.continue {
+  margin-top: 30rpx;
+}
+

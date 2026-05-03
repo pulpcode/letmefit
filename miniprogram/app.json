@@ -1,0 +1,44 @@
+{
+  "pages": [
+    "pages/login/index",
+    "pages/onboarding/index",
+    "pages/home/index",
+    "pages/records/index",
+    "pages/chat/index",
+    "pages/summary/index",
+    "pages/profile/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "LetMeFit",
+    "navigationBarBackgroundColor": "#F7FBFA",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#F7FBFA"
+  },
+  "tabBar": {
+    "color": "#7A8B87",
+    "selectedColor": "#0B8F7A",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "今日"
+      },
+      {
+        "pagePath": "pages/records/index",
+        "text": "记录"
+      },
+      {
+        "pagePath": "pages/chat/index",
+        "text": "Agent"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的"
+      }
+    ]
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents",
+  "sitemapLocation": "sitemap.json"
+}

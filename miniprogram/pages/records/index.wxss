@@ -1,0 +1,65 @@
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.small {
+  min-height: 68rpx;
+  padding: 0 20rpx;
+  font-size: 24rpx;
+}
+
+.record-entry {
+  margin-top: 28rpx;
+}
+
+.group {
+  margin-top: 34rpx;
+}
+
+.group-title {
+  margin-bottom: 16rpx;
+  color: #18332f;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.empty,
+.record {
+  margin-top: 16rpx;
+  padding: 24rpx;
+}
+
+.empty {
+  color: #7a8b87;
+  text-align: center;
+}
+
+.record-title {
+  color: #18332f;
+  font-weight: 700;
+}
+
+.record-sub {
+  margin-top: 8rpx;
+  color: #7a8b87;
+  font-size: 24rpx;
+}
+
+.foods {
+  margin-top: 14rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.food {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  color: #0b6f60;
+  background: #e7f5f1;
+  font-size: 22rpx;
+}
+

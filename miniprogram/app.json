@@ -1,0 +1,43 @@
+{
+  "pages": [
+    "pages/welcome/index",
+    "pages/login/index",
+    "pages/onboarding/index",
+    "pages/home/index",
+    "pages/records/index",
+    "pages/agent/index",
+    "pages/summary/index",
+    "pages/profile/index"
+  ],
+  "window": {
+    "navigationStyle": "custom",
+    "backgroundColor": "#f9fafb",
+    "backgroundTextStyle": "light",
+    "navigationBarTextStyle": "black"
+  },
+  "tabBar": {
+    "color": "#99a1af",
+    "selectedColor": "#06d6a0",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "今日"
+      },
+      {
+        "pagePath": "pages/records/index",
+        "text": "记录"
+      },
+      {
+        "pagePath": "pages/agent/index",
+        "text": "Agent"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json"
+}

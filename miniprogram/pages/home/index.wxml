@@ -1,0 +1,87 @@
+<view class="home page">
+  <view class="hero">
+    <image wx:if="{{isEmpty}}" class="hero-bg" src="/assets/fit-chat-background.png" mode="aspectFill" />
+    <view class="hero-mask"></view>
+    <view class="hero-content">
+      <text class="hero-title">{{greetingText}}</text>
+      <text class="hero-date">{{todayText}}</text>
+    </view>
+  </view>
+
+  <view class="home-content">
+    <button wx:if="{{!profileCompleted}}" class="profile-tip" bindtap="goProfile">
+      <view>
+        <text class="profile-tip-title">完善基础档案</text>
+        <text class="profile-tip-desc">获得更准确建议</text>
+      </view>
+      <text class="profile-tip-action">去完善</text>
+    </button>
+
+    <view class="card status-card">
+      <text class="section-title {{isEmpty ? 'subtle' : ''}}">今日状态</text>
+      <view class="stats-grid">
+        <view>
+          <text class="stat-num {{isEmpty ? 'empty' : ''}}">{{stats.mealCount}}</text>
+          <text class="stat-label">餐食记录</text>
+        </view>
+        <view>
+          <text class="stat-num {{isEmpty ? 'empty' : ''}}">{{stats.bodyMetricCount}}</text>
+          <text class="stat-label">身体指标</text>
+        </view>
+        <view>
+          <text class="stat-num green {{isEmpty ? 'empty' : ''}}">{{stats.calories}}</text>
+          <text class="stat-label">估算热量 (kcal)</text>
+        </view>
+        <view>
+          <text class="stat-num blue {{isEmpty ? 'empty' : ''}}">{{stats.protein}}</text>
+          <text class="stat-label">蛋白质</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="quick-grid">
+      <button class="quick-card card" data-mode="meal" bindtap="goAgent">
+        <text class="quick-icon green-bg">餐</text>
+        <text>记录饮食</text>
+      </button>
+      <button class="quick-card card" data-mode="weight" bindtap="goAgent">
+        <text class="quick-icon blue-bg">重</text>
+        <text>记录体重</text>
+      </button>
+      <button class="quick-card card" bindtap="goAgent">
+        <text class="quick-icon orange-bg">问</text>
+        <text>问问Agent</text>
+      </button>
+    </view>
+
+    <view wx:if="{{!isEmpty}}" class="advice-card">
+      <text class="advice-title">今日建议</text>
+      <text class="advice-text">{{suggestion}}</text>
+      <button class="advice-link" bindtap="goSummary">查看详细总结</button>
+    </view>
+
+    <view wx:if="{{!isEmpty}}" class="card recent-card">
+      <view class="card-head">
+        <text class="section-title">最近记录</text>
+        <button bindtap="goRecords">查看全部</button>
+      </view>
+      <view class="recent-list">
+        <view wx:for="{{recentRecords}}" wx:key="id" class="recent-row">
+          <text class="recent-icon {{item.tone === 'blue' ? 'blue-bg' : 'green-bg'}}">{{item.type === 'meal' ? '餐' : '重'}}</text>
+          <view class="recent-main">
+            <text class="recent-title">{{item.title}}</text>
+            <text class="recent-time">{{item.time}}</text>
+          </view>
+          <text class="recent-value">{{item.value}}</text>
+          <text class="chevron">›</text>
+        </view>
+      </view>
+    </view>
+
+    <view wx:else class="card empty-card">
+      <image src="/assets/female-fit-agent.png" mode="aspectFill" />
+      <text>今天还没有任何记录，开始记录你的第一餐吧！</text>
+      <button class="mini-primary" data-mode="meal" bindtap="goAgent">开始记录</button>
+    </view>
+  </view>
+</view>

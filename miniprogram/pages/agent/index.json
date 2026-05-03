@@ -1,0 +1,6 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "pending-action-card": "/components/pending-action-card/index"
+  }
+}

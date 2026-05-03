@@ -1,0 +1,69 @@
+<view wx:if="{{card}}" class="pending-card">
+  <view class="pending-head">
+    <view class="pending-dot"></view>
+    <text class="pending-title">请确认后保存</text>
+  </view>
+
+  <view wx:if="{{card.kind === 'meal'}}" class="pending-body">
+    <view class="record-title">{{card.mealType}}</view>
+    <view class="meal-items">
+      <view wx:for="{{card.items}}" wx:key="name" class="meal-item">
+        <view class="meal-item-head">
+          <view>
+            <view class="meal-name">{{item.name || '未命名食物'}}</view>
+            <view class="meal-portion">{{item.portion_text || (item.portion_grams ? item.portion_grams + 'g' : '份量待确认')}}</view>
+          </view>
+          <view wx:if="{{item.lowConfidence}}" class="estimate-tag">估算</view>
+        </view>
+        <view class="macro-row">
+          <view class="macro">
+            <text>热量</text>
+            <text>{{item.caloriesText}}</text>
+          </view>
+          <view class="macro">
+            <text>蛋白质</text>
+            <text>{{item.proteinText}}</text>
+          </view>
+          <view class="macro">
+            <text>碳水</text>
+            <text>{{item.carbsText}}</text>
+          </view>
+          <view class="macro">
+            <text>脂肪</text>
+            <text>{{item.fatText}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+    <view class="total-row">
+      <view wx:for="{{card.totals}}" wx:key="label" class="macro">
+        <text>{{item.label}}</text>
+        <text>{{item.value}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:elif="{{card.kind === 'body'}}" class="pending-body">
+    <view class="record-title">身体指标</view>
+    <view class="metric-list">
+      <view wx:for="{{card.fields}}" wx:key="label" class="metric-row">
+        <text>{{item.label}}</text>
+        <text>{{item.value}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:else class="pending-body">
+    <text class="muted">这条结果需要确认后再保存。</text>
+  </view>
+
+  <view wx:if="{{card.hasWarnings}}" class="warning-line">
+    <text>部分字段为估算值，确认前可修改</text>
+  </view>
+
+  <view class="pending-actions">
+    <button class="action-btn discard" bindtap="onDiscard">放弃</button>
+    <button class="action-btn edit" bindtap="onEdit">修改</button>
+    <button class="action-btn confirm" bindtap="onConfirm">确认保存</button>
+  </view>
+</view>

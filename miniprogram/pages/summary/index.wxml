@@ -1,0 +1,78 @@
+<view class="summary page">
+  <view class="summary-hero">
+    <text class="summary-date">{{date}}</text>
+    <text class="gradient-title">今日总结</text>
+    <view class="summary-metrics">
+      <view>
+        <text>热量</text>
+        <text>{{summary.calorie_total || 0}}</text>
+      </view>
+      <view>
+        <text>蛋白质</text>
+        <text>{{summary.protein_total_g || 0}}g</text>
+      </view>
+      <view>
+        <text>记录完整度</text>
+        <text>{{summary.completeness_score ? summary.completeness_score * 100 : 0}}%</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="summary-content">
+    <view class="card nutrition-card">
+      <text class="section-title">营养摄入</text>
+      <view class="bars">
+        <view wx:for="{{bars}}" wx:key="label" class="bar-row">
+          <view>
+            <text>{{item.label}}</text>
+            <text>{{item.value}}</text>
+          </view>
+          <view class="bar-track">
+            <view class="bar-fill {{item.color}}" style="width: {{item.width}}"></view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="suggest-card">
+      <text class="suggest-icon">↗</text>
+      <view>
+        <text class="section-title">建议</text>
+        <text class="suggest-text">{{summary.suggestions && summary.suggestions.length ? summary.suggestions[0] : '继续保持记录节奏，晚些时候可再生成总结。'}}</text>
+      </view>
+    </view>
+
+    <view class="card list-card">
+      <view class="list-head">
+        <text class="section-title">餐食记录</text>
+        <text class="count">({{meals.length}})</text>
+      </view>
+      <view wx:for="{{meals}}" wx:key="id" class="summary-item">
+        <view class="summary-item-head">
+          <text>{{item.mealTypeText}}</text>
+          <text>{{item.time}}</text>
+        </view>
+        <text class="summary-foods">{{item.foods}}</text>
+        <text class="primary-text">{{item.caloriesText}}</text>
+      </view>
+      <view wx:if="{{!meals.length}}" class="small-empty">暂无餐食记录</view>
+    </view>
+
+    <view class="card list-card">
+      <view class="list-head">
+        <text class="section-title">身体指标</text>
+        <text class="count">({{metrics.length}})</text>
+      </view>
+      <view wx:for="{{metrics}}" wx:key="id" class="summary-item compact">
+        <view class="summary-item-head">
+          <text>体重记录</text>
+          <text>{{item.time}}</text>
+        </view>
+        <text class="info-text">{{item.valueText}}</text>
+      </view>
+      <view wx:if="{{!metrics.length}}" class="small-empty">暂无身体指标记录</view>
+    </view>
+
+    <button class="btn-primary" bindtap="goAgent">继续记录</button>
+  </view>
+</view>

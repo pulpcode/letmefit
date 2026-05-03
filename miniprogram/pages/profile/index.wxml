@@ -1,0 +1,45 @@
+<view class="profile page">
+  <view class="profile-hero">
+    <text class="gradient-title">我的档案</text>
+  </view>
+
+  <view class="profile-content">
+    <view class="card avatar-card">
+      <text class="section-title">Agent 形象</text>
+      <view class="avatar-grid">
+        <button data-avatar="female" class="avatar-option {{avatar === 'female' ? 'selected' : ''}}" bindtap="selectAvatar">
+          <image src="/assets/female-fit-agent.png" mode="aspectFill" />
+          <text>女性 Agent</text>
+        </button>
+        <button data-avatar="male" class="avatar-option {{avatar === 'male' ? 'selected' : ''}}" bindtap="selectAvatar">
+          <image src="/assets/male-fit-agent.png" mode="aspectFill" />
+          <text>男性 Agent</text>
+        </button>
+      </view>
+    </view>
+
+    <view class="card info-card">
+      <view class="info-head">
+        <text class="section-title">基础信息</text>
+        <button bindtap="goEdit">编辑</button>
+      </view>
+      <view class="info-list">
+        <button wx:for="{{rows}}" wx:key="key" class="info-row" bindtap="goEdit">
+          <text class="row-icon">•</text>
+          <text class="row-label">{{item.label}}</text>
+          <text class="row-value">{{item.value}}</text>
+          <text class="chevron">›</text>
+        </button>
+      </view>
+    </view>
+
+    <button class="logout-card card" bindtap="onLogout">
+      <text class="danger-text">退出登录</text>
+    </button>
+
+    <view class="version">
+      <text>LetMeFit v1.0.0</text>
+      <text>你的健康健身管理助手</text>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,163 @@
+.pending-card {
+  width: 100%;
+  background: #ffffff;
+  border: 2rpx solid rgba(6, 214, 160, 0.28);
+  border-radius: 24rpx;
+  padding: 32rpx;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.08);
+}
+
+.pending-head {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
+}
+
+.pending-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 9999rpx;
+  background: #06d6a0;
+}
+
+.pending-title {
+  color: #101828;
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.pending-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.record-title {
+  color: #101828;
+  font-size: 32rpx;
+  font-weight: 500;
+}
+
+.meal-items {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.meal-item {
+  padding: 24rpx;
+  border-radius: 18rpx;
+  border: 2rpx solid #e5e7eb;
+}
+
+.meal-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.meal-name {
+  color: #101828;
+  font-size: 28rpx;
+  line-height: 40rpx;
+}
+
+.meal-portion {
+  color: #6a7282;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.estimate-tag {
+  color: #ff6b35;
+  background: #fff4e6;
+  border-radius: 9999rpx;
+  padding: 4rpx 12rpx;
+  font-size: 22rpx;
+}
+
+.macro-row,
+.total-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12rpx;
+}
+
+.total-row {
+  padding: 20rpx 24rpx;
+  background: #f9fafb;
+  border-radius: 18rpx;
+}
+
+.macro {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  color: #101828;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.macro text:first-child {
+  color: #6a7282;
+}
+
+.metric-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+}
+
+.metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #101828;
+  font-size: 28rpx;
+}
+
+.metric-row text:first-child {
+  color: #4a5565;
+}
+
+.warning-line {
+  margin-top: 22rpx;
+  color: #ff6b35;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.pending-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  gap: 12rpx;
+  margin-top: 24rpx;
+}
+
+.action-btn {
+  height: 76rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  font-weight: 500;
+}
+
+.action-btn.discard {
+  color: #fb2c36;
+  background: #fff5f5;
+}
+
+.action-btn.edit {
+  color: #4a5565;
+  background: #f3f4f6;
+}
+
+.action-btn.confirm {
+  color: #ffffff;
+  background: linear-gradient(90deg, #06d6a0 0%, #00b4d8 100%);
+}

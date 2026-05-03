@@ -1,0 +1,63 @@
+<view class="onboarding page-white">
+  <view class="progress">
+    <view class="progress-seg {{step >= 1 ? 'active' : ''}}"></view>
+    <view class="progress-seg {{step >= 2 ? 'active' : ''}}"></view>
+    <view class="progress-seg {{step >= 3 ? 'active' : ''}}"></view>
+  </view>
+
+  <view wx:if="{{step === 1}}" class="panel">
+    <text class="page-title">你的主要目标</text>
+    <text class="caption">选择一个最符合当前需求的目标</text>
+    <view class="option-list goal-list">
+      <button wx:for="{{goalOptions}}" wx:key="value" data-value="{{item.value}}" class="option-row {{form.goal_type === item.value ? 'selected' : ''}}" bindtap="selectGoal">
+        <text class="option-icon">{{index + 1}}</text>
+        <text>{{item.label}}</text>
+      </button>
+    </view>
+  </view>
+
+  <view wx:elif="{{step === 2}}" class="panel">
+    <text class="page-title">基础信息</text>
+    <text class="caption">帮助我们提供更准确的建议</text>
+    <view class="field-group">
+      <text class="label">性别</text>
+      <view class="sex-grid">
+        <button wx:for="{{sexOptions}}" wx:key="value" data-value="{{item.value}}" class="sex-option {{form.sex === item.value ? 'selected' : ''}}" bindtap="selectSex">{{item.label}}</button>
+      </view>
+    </view>
+    <view class="field-group">
+      <text class="label">年龄</text>
+      <input class="input-box" type="number" placeholder="请输入年龄" data-field="age" value="{{form.age}}" bindinput="onInput" />
+    </view>
+    <view class="field-group">
+      <text class="label">身高 (cm)</text>
+      <input class="input-box" type="digit" placeholder="请输入身高" data-field="height_cm" value="{{form.height_cm}}" bindinput="onInput" />
+    </view>
+    <view class="field-group">
+      <text class="label">当前体重 (kg)</text>
+      <input class="input-box" type="digit" placeholder="请输入当前体重" data-field="current_weight_kg" value="{{form.current_weight_kg}}" bindinput="onInput" />
+    </view>
+    <view class="field-group">
+      <text class="label">目标体重 (kg) <text class="subtle">可选</text></text>
+      <input class="input-box" type="digit" placeholder="请输入目标体重" data-field="target_weight_kg" value="{{form.target_weight_kg}}" bindinput="onInput" />
+    </view>
+  </view>
+
+  <view wx:else class="panel">
+    <text class="page-title">活动水平</text>
+    <text class="caption">你平时的运动频率如何</text>
+    <view class="activity-list">
+      <button wx:for="{{activityOptions}}" wx:key="value" data-value="{{item.value}}" class="activity-option {{form.activity_level === item.value ? 'selected' : ''}}" bindtap="selectActivity">
+        <text class="activity-label">{{item.label}}</text>
+        <text class="activity-desc">{{item.desc}}</text>
+      </button>
+    </view>
+  </view>
+
+  <view class="bottom-actions">
+    <button class="btn-primary {{!form.goal_type && step === 1 ? 'disabled' : ''}} {{step === 2 && (!form.sex || !form.age || !form.height_cm || !form.current_weight_kg) ? 'disabled' : ''}} {{step === 3 && !form.activity_level ? 'disabled' : ''}}" bindtap="onNext">
+      {{step === 3 ? '完成' : '下一步'}}
+    </button>
+    <button class="btn-secondary" bindtap="onSkip">稍后完善</button>
+  </view>
+</view>

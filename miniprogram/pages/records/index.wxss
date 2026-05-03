@@ -1,0 +1,78 @@
+.records-header {
+  min-height: 232rpx;
+  padding: 64rpx 48rpx 32rpx;
+  background: linear-gradient(90deg, #06d6a0 0%, #00b4d8 100%);
+  color: rgba(255, 255, 255, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  font-size: 28rpx;
+}
+
+.records-content {
+  margin-top: -32rpx;
+  padding: 0 48rpx 48rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 32rpx;
+}
+
+.list-card {
+  padding: 40rpx;
+}
+
+.list-head {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.count {
+  color: #6a7282;
+  font-size: 28rpx;
+}
+
+.record-list {
+  margin-top: 32rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.record-item {
+  min-height: 148rpx;
+  border: 2rpx solid #e5e7eb;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
+.record-item view {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.record-title {
+  color: #101828;
+  font-size: 28rpx;
+  line-height: 40rpx;
+}
+
+.record-desc {
+  color: #6a7282;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.small-empty {
+  margin-top: 32rpx;
+  padding: 48rpx 0;
+  color: #99a1af;
+  font-size: 28rpx;
+  text-align: center;
+}

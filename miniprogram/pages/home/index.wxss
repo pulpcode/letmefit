@@ -1,0 +1,296 @@
+.home {
+  padding-bottom: 48rpx;
+}
+
+.hero {
+  position: relative;
+  height: 384rpx;
+  overflow: hidden;
+}
+
+.hero-bg,
+.hero-mask {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.hero-mask {
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.hero-content {
+  position: relative;
+  padding: 96rpx 48rpx 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.hero-title {
+  color: #101828;
+  font-size: 48rpx;
+  font-weight: 500;
+  line-height: 64rpx;
+}
+
+.hero-date {
+  color: #6a7282;
+  font-size: 28rpx;
+  line-height: 40rpx;
+}
+
+.home-content {
+  margin-top: -96rpx;
+  padding: 0 48rpx;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 32rpx;
+}
+
+.profile-tip {
+  min-height: 112rpx;
+  border-radius: 20rpx;
+  padding: 24rpx 32rpx;
+  background: #fff4e6;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.profile-tip view {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-tip-title {
+  color: #101828;
+  font-size: 30rpx;
+  font-weight: 500;
+}
+
+.profile-tip-desc {
+  margin-top: 4rpx;
+  color: #6a7282;
+  font-size: 24rpx;
+}
+
+.profile-tip-action {
+  color: #ff6b35;
+  font-size: 28rpx;
+  font-weight: 500;
+}
+
+.status-card {
+  height: 400rpx;
+  padding: 40rpx;
+}
+
+.stats-grid {
+  margin-top: 32rpx;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  row-gap: 32rpx;
+}
+
+.stats-grid view {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.stat-num {
+  color: #101828;
+  font-size: 48rpx;
+  line-height: 64rpx;
+}
+
+.stat-num.green {
+  color: #06d6a0;
+}
+
+.stat-num.blue {
+  color: #00b4d8;
+}
+
+.stat-num.empty {
+  color: #d1d5dc;
+}
+
+.stat-label {
+  color: #6a7282;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24rpx;
+}
+
+.quick-card {
+  height: 192rpx;
+  padding: 32rpx 20rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
+  color: #364153;
+  font-size: 24rpx;
+  font-weight: 500;
+}
+
+.quick-icon,
+.recent-icon {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 9999rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.green-bg {
+  background: #e8f9f5;
+  color: #06d6a0;
+}
+
+.blue-bg {
+  background: #e3f2fd;
+  color: #00b4d8;
+}
+
+.orange-bg {
+  background: #fff4e6;
+  color: #ff6b35;
+}
+
+.advice-card {
+  min-height: 280rpx;
+  border-radius: 20rpx;
+  padding: 32rpx;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(90deg, #06d6a0 0%, #00b4d8 100%);
+  color: #ffffff;
+}
+
+.advice-title {
+  font-size: 32rpx;
+  font-weight: 500;
+}
+
+.advice-text {
+  margin-top: 20rpx;
+  font-size: 28rpx;
+  line-height: 40rpx;
+  opacity: 0.94;
+}
+
+.advice-link {
+  margin-top: auto;
+  color: #ffffff;
+  font-size: 28rpx;
+  text-decoration: underline;
+}
+
+.recent-card {
+  padding: 40rpx;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-head button {
+  color: #06d6a0;
+  font-size: 28rpx;
+  font-weight: 500;
+}
+
+.recent-list {
+  margin-top: 32rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.recent-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.recent-title {
+  color: #101828;
+  font-size: 28rpx;
+  line-height: 40rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-time {
+  color: #6a7282;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.recent-value {
+  color: #4a5565;
+  font-size: 28rpx;
+}
+
+.chevron {
+  color: #99a1af;
+  font-size: 40rpx;
+}
+
+.empty-card {
+  height: 600rpx;
+  padding: 96rpx 48rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: #6a7282;
+  font-size: 28rpx;
+  line-height: 40rpx;
+}
+
+.empty-card image {
+  width: 192rpx;
+  height: 192rpx;
+  border-radius: 9999rpx;
+  margin-bottom: 32rpx;
+}
+
+.mini-primary {
+  margin-top: 32rpx;
+  height: 72rpx;
+  padding: 0 40rpx;
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 28rpx;
+  background: linear-gradient(90deg, #06d6a0 0%, #00b4d8 100%);
+}

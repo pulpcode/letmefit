@@ -1,0 +1,44 @@
+<view class="records page">
+  <view class="records-header">
+    <text class="gradient-title">记录</text>
+    <text>{{todayText}}</text>
+  </view>
+
+  <view class="records-content">
+    <view class="card list-card">
+      <view class="list-head">
+        <text class="section-title">餐食记录</text>
+        <text class="count">({{meals.length}})</text>
+      </view>
+      <view wx:if="{{meals.length}}" class="record-list">
+        <view wx:for="{{meals}}" wx:key="id" class="record-item">
+          <view>
+            <text class="record-title">{{item.title}}</text>
+            <text class="record-desc">{{item.time}} · {{item.items && item.items.length ? item.items.length + '项食物' : '已记录'}}</text>
+          </view>
+          <text class="primary-text">{{item.caloriesText}}</text>
+        </view>
+      </view>
+      <view wx:else class="small-empty">今天还没有餐食记录</view>
+    </view>
+
+    <view class="card list-card">
+      <view class="list-head">
+        <text class="section-title">身体指标</text>
+        <text class="count">({{metrics.length}})</text>
+      </view>
+      <view wx:if="{{metrics.length}}" class="record-list">
+        <view wx:for="{{metrics}}" wx:key="id" class="record-item">
+          <view>
+            <text class="record-title">{{item.title}}</text>
+            <text class="record-desc">{{item.time}} · {{item.body_fat_percentage ? '体脂 ' + item.body_fat_percentage + '%' : '身体指标'}}</text>
+          </view>
+          <text class="info-text">{{item.weightText}}</text>
+        </view>
+      </view>
+      <view wx:else class="small-empty">今天还没有身体指标记录</view>
+    </view>
+
+    <button class="btn-primary" bindtap="goAgent">继续记录</button>
+  </view>
+</view>

@@ -1,0 +1,48 @@
+<view class="agent-page">
+  <image class="chat-bg" src="/assets/fit-chat-background.png" mode="aspectFill" />
+  <view class="chat-mask"></view>
+
+  <view class="chat-header">
+    <view class="agent-mini-avatar">
+      <image src="{{avatarSrc}}" mode="aspectFill" />
+    </view>
+    <view>
+      <text class="chat-title">LetMeFit Agent</text>
+      <text class="chat-subtitle">饮食、体重、总结与一般生活方式建议</text>
+    </view>
+  </view>
+
+  <scroll-view class="message-scroll" scroll-y scroll-into-view="{{scrollIntoView}}">
+    <view class="message-list">
+      <view wx:if="{{!messages.length}}" class="empty-chat">
+        <image src="{{avatarSrc}}" mode="aspectFill" />
+        <text>告诉我你吃了什么、体重变化，或上传照片/语音。我会先整理成待确认记录。</text>
+      </view>
+
+      <view wx:for="{{messages}}" wx:key="id" class="message-row {{item.role === 'user' ? 'user' : 'assistant'}}">
+        <image wx:if="{{item.role === 'assistant'}}" class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
+        <view class="bubble">
+          <text>{{item.text}}</text>
+        </view>
+      </view>
+
+      <view wx:for="{{pendingActions}}" wx:key="pending_action_id" class="pending-wrap">
+        <pending-action-card action="{{item}}" bind:confirm="onConfirmAction" bind:discard="onDiscardAction" bind:edit="onEditAction" />
+      </view>
+
+      <view id="bottom-anchor" class="bottom-anchor"></view>
+    </view>
+  </scroll-view>
+
+  <view class="chat-input-bar">
+    <view class="tool-row">
+      <button class="tool-btn" bindtap="chooseCamera">拍</button>
+      <button class="tool-btn" bindtap="chooseAlbum">图</button>
+      <button class="tool-btn {{recording ? 'active' : ''}}" bindtap="onVoiceTap">{{recording ? '停' : '语'}}</button>
+    </view>
+    <view class="send-row">
+      <input class="chat-input" placeholder="{{inputPlaceholder}}" value="{{inputValue}}" confirm-type="send" bindinput="onInput" bindconfirm="onSend" />
+      <button class="send-btn {{!inputValue || sending ? 'disabled' : ''}}" bindtap="onSend">发送</button>
+    </view>
+  </view>
+</view>

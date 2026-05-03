@@ -1,0 +1,38 @@
+<view class="welcome-page">
+  <image class="welcome-bg" src="/assets/fit-chat-background.png" mode="aspectFill" />
+  <view class="welcome-mask"></view>
+
+  <view class="brand-block">
+    <view class="brand-orb green"></view>
+    <view class="brand-orb orange"></view>
+    <text class="brand-title">LetMeFit</text>
+    <view class="brand-subtitle">
+      <text class="spark">AI</text>
+      <text>AI 健康健身助手</text>
+    </view>
+  </view>
+
+  <view class="agent-stack">
+    <view class="agent-polaroid female">
+      <image src="/assets/female-fit-agent.png" mode="aspectFill" />
+    </view>
+    <view class="agent-polaroid male">
+      <image src="/assets/male-fit-agent.png" mode="aspectFill" />
+    </view>
+  </view>
+
+  <view class="welcome-copy">
+    <text class="slogan">智能记录 · 精准建议 · 健康生活</text>
+    <text class="desc">通过 AI 对话轻松记录饮食和身体指标，获得个性化健康建议</text>
+  </view>
+
+  <view class="welcome-actions">
+    <button class="btn-primary" bindtap="onStart">开始使用</button>
+    <button class="btn-secondary" bindtap="onDemo">查看 UI 演示</button>
+    <view class="badges">
+      <view><text class="dot green-dot"></text><text>非医疗用途</text></view>
+      <view><text class="dot blue-dot"></text><text>数据安全</text></view>
+      <view><text class="dot orange-dot"></text><text>易于使用</text></view>
+    </view>
+  </view>
+</view>

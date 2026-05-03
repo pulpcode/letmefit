@@ -1,8 +1,0 @@
-{
-  "navigationBarTitleText": "Agent",
-  "usingComponents": {
-    "meal-confirm-card": "/components/meal-confirm-card/index",
-    "body-metric-confirm-card": "/components/body-metric-confirm-card/index"
-  }
-}
-

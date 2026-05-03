@@ -40,7 +40,7 @@ class MealService:
         meal = self._get_owned_meal(user_id, meal_id)
         return self._response(meal, self._items_by_meal_id(meal.id))
 
-    def create_meal(self, user_id: str, payload: MealCreateRequest) -> dict:
+    def create_meal(self, user_id: str, payload: MealCreateRequest, commit: bool = True) -> dict:
         recorded_at, local_date = normalize_recorded_time(payload.recorded_at, payload.recorded_tz)
         totals = self._totals(payload.items)
         meal = MealRecord(
@@ -62,8 +62,11 @@ class MealService:
         self.db.add(meal)
         self.db.flush()
         self._add_items(meal.id, payload.items)
-        self.db.commit()
-        return self.get_meal(user_id, meal.id)
+        self.db.flush()
+        if commit:
+            self.db.commit()
+            return self.get_meal(user_id, meal.id)
+        return self._response(meal, self._items_by_meal_id(meal.id))
 
     def update_meal(self, user_id: str, meal_id: str, payload: MealPatchRequest) -> dict:
         meal = self._get_owned_meal(user_id, meal_id)

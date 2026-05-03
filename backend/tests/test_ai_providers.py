@@ -167,6 +167,12 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     assert prompt_json["conversation_context"]["conversation_summary"]["created_at"] == (
         "2026-05-01 12:00:00"
     )
+    assert prompt_json["context_contract"]["authority_order"][:3] == [
+        "message_content",
+        "profile",
+        "recent_records",
+    ]
+    assert "只有 active_pending_actions" in "".join(prompt_json["context_contract"]["rules"])
 
 
 def test_bailian_debug_request_body_matches_chat_completion_body() -> None:

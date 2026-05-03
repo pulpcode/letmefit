@@ -572,7 +572,7 @@ V1 第一阶段使用本地规则生成总结，后续可替换为 LLM adapter�
 
 V1 的交互形式是通用 Agent 对话。用户可以发送文本、图片、拍照图片或语音，后端只在健身管理边界内处理能力。
 
-Agent 接口可以返回自然语言回复，也可以返回结构化待确认动作。只要动作会产生餐食、身体指标、每日总结等实质业务记录，后端必须先生成 `pending_action`，由客户端在对话中展示确认卡片。用户确认或修改后，后端才写入正式记录。
+Agent 接口可以返回自然语言回复、自动写入的正式记录，也可以返回结构化待确认动作。低歧义、明确数值的身体指标和精确克重餐食可由后端规则自动写入；图片识别、模糊描述、低置信度或字段不完整的结果必须先生成 `pending_action`，由客户端展示确认卡片。用户确认或修改后，后端才写入正式记录。
 
 模型调用前，后端会先用 `InputNormalizer` 处理图片和音频 part，再用 `ContextBuilder` 动态组装上下文。上下文包含多模态处理状态、滚动摘要、最近若干条会话消息、当前待确认动作、用户档案和最近正式记录；不会把全量历史消息直接发送给模型。较早消息会压缩进 `conversation_summaries`，该摘要只用于后续模型上下文，不作为正式事实来源。
 
@@ -673,6 +673,7 @@ Agent 接口可以返回自然语言回复，也可以返回结构化待确认�
     "assistant_text": "我识别到这可能是一份午餐记录，请确认下面的食物和份量。",
     "intent": "fitness_record",
     "requires_review": true,
+    "committed_records": [],
     "pending_actions": [
       {
         "pending_action_id": "pa_...",
@@ -689,6 +690,38 @@ Agent 接口可以返回自然语言回复，也可以返回结构化待确认�
             "reason": "low_confidence"
           }
         ]
+      }
+    ]
+  },
+  "request_id": "req_..."
+}
+```
+
+明确输入可能被自动保存，此时 `requires_review=false`、`pending_actions=[]`，并返回 `committed_records`：
+
+```json
+{
+  "data": {
+    "message_id": "msg_...",
+    "assistant_message_id": "msg_...",
+    "assistant_text": "已自动保存：体重 72.4kg。可在记录页修改或删除。",
+    "intent": "fitness_record",
+    "requires_review": false,
+    "pending_actions": [],
+    "committed_records": [
+      {
+        "type": "body_metric",
+        "record_id": "bm_...",
+        "source": "auto_commit",
+        "source_message_id": "msg_...",
+        "confidence": 0.9,
+        "decision_reason": "clear_body_metric",
+        "message": "已自动保存：体重 72.4kg。可在记录页修改或删除。",
+        "record": {
+          "id": "bm_...",
+          "source_type": "text",
+          "weight_kg": 72.4
+        }
       }
     ]
   },
@@ -971,7 +1004,47 @@ V1 第一阶段先支持 `client_local` 上传记录：原始图片/音频保留
 }
 ```
 
-## 11. 后续补充
+## 11. 开发测试接口
+
+以下接口只允许在 `ENVIRONMENT=local` 或 `ENVIRONMENT=test` 使用；生产环境返回接口不存在。
+
+### POST /dev/reset-current-user
+
+清空当前登录用户的测试业务数据，保留账号、登录态、短信事件和用户档案。用于反复联调会话、AI 提取、待确认动作和正式记录上下文。
+
+清理范围：
+
+- `conversation_messages`、`message_attachments`、`conversation_summaries`、`conversations`
+- `agent_extractions`、`agent_pending_actions`
+- `meal_items`、`meal_records`、`body_metric_records`
+- `daily_archives`、`daily_summaries`、`user_memories`
+- `upload_files` 元数据
+
+响应：
+
+```json
+{
+  "data": {
+    "deleted": {
+      "conversations": 2,
+      "conversation_messages": 12,
+      "agent_pending_actions": 3,
+      "meal_records": 4,
+      "body_metric_records": 1,
+      "upload_files": 2
+    },
+    "preserved": [
+      "users",
+      "refresh_sessions",
+      "sms_verification_events",
+      "user_profiles"
+    ]
+  },
+  "request_id": "req_..."
+}
+```
+
+## 12. 后续补充
 
 - 分页规范
 - 排序规范

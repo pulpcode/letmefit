@@ -6,10 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.draft_normalizer import normalize_pending_action_draft
-from app.auth.security import utc_now
+from app.auth.security import new_id, utc_now
 from app.core.database import get_db
 from app.core.errors import AppError
-from app.models import AgentPendingAction, Conversation
+from app.models import AgentPendingAction, Conversation, ConversationMessage
 from app.schemas.pending_action import PendingActionUpdateRequest, decimal_to_float
 from app.schemas.records import BodyMetricCreateRequest, MealCreateRequest
 from app.services.body_metrics import BodyMetricService
@@ -42,7 +42,7 @@ class PendingActionService:
         pending_action_id: str,
         payload: PendingActionUpdateRequest,
     ) -> dict:
-        action = self._get_owned_action(user_id, pending_action_id)
+        action = self._get_owned_action(user_id, pending_action_id, lock=True)
         self._ensure_editable(action)
         draft_payload = dict(action.draft_payload_json)
         draft_payload.update(payload.draft_payload)
@@ -55,7 +55,9 @@ class PendingActionService:
         return self._response(action)
 
     def confirm_action(self, user_id: str, pending_action_id: str) -> dict:
-        action = self._get_owned_action(user_id, pending_action_id)
+        action = self._get_owned_action(user_id, pending_action_id, lock=True)
+        if action.status == "committed":
+            return self._committed_response(action)
         self._ensure_editable(action)
         if action.action_type == "create_meal_record":
             record = self._commit_meal(user_id, action)
@@ -70,18 +72,30 @@ class PendingActionService:
         action.confirmed_at = utc_now()
         action.committed_record_type = record_type
         action.committed_record_id = record["id"]
+        self._add_action_event(
+            action=action,
+            event_type="record_committed",
+            text=self._record_committed_text(record_type, record),
+            record_type=record_type,
+            record_id=record["id"],
+        )
         self.db.commit()
-        return {
-            "pending_action_id": action.id,
-            "status": action.status,
-            "record_type": record_type,
-            "record_id": record["id"],
-        }
+        return self._committed_response(action)
 
     def discard_action(self, user_id: str, pending_action_id: str) -> dict:
-        action = self._get_owned_action(user_id, pending_action_id)
+        action = self._get_owned_action(user_id, pending_action_id, lock=True)
+        if action.status == "discarded":
+            return {
+                "pending_action_id": action.id,
+                "status": action.status,
+            }
         self._ensure_editable(action)
         action.status = "discarded"
+        self._add_action_event(
+            action=action,
+            event_type="pending_action_discarded",
+            text="已放弃这条候选记录。",
+        )
         self.db.commit()
         return {
             "pending_action_id": action.id,
@@ -99,7 +113,7 @@ class PendingActionService:
                 status_code=422,
                 details={"errors": exc.errors()},
             ) from exc
-        return MealService(self.db).create_meal(user_id, payload)
+        return MealService(self.db).create_meal(user_id, payload, commit=False)
 
     def _commit_body_metric(self, user_id: str, action: AgentPendingAction) -> dict:
         draft_payload = self._draft_with_source(action)
@@ -112,7 +126,7 @@ class PendingActionService:
                 status_code=422,
                 details={"errors": exc.errors()},
             ) from exc
-        return BodyMetricService(self.db).create_body_metric(user_id, payload)
+        return BodyMetricService(self.db).create_body_metric(user_id, payload, commit=False)
 
     def _draft_with_source(self, action: AgentPendingAction) -> dict[str, Any]:
         draft_payload = normalize_pending_action_draft(
@@ -132,13 +146,19 @@ class PendingActionService:
         if not conversation:
             raise AppError("RESOURCE_NOT_FOUND", "会话不存在", status_code=404)
 
-    def _get_owned_action(self, user_id: str, pending_action_id: str) -> AgentPendingAction:
-        action = self.db.scalar(
-            select(AgentPendingAction).where(
-                AgentPendingAction.id == pending_action_id,
-                AgentPendingAction.user_id == user_id,
-            )
+    def _get_owned_action(
+        self,
+        user_id: str,
+        pending_action_id: str,
+        lock: bool = False,
+    ) -> AgentPendingAction:
+        query = select(AgentPendingAction).where(
+            AgentPendingAction.id == pending_action_id,
+            AgentPendingAction.user_id == user_id,
         )
+        if lock:
+            query = query.with_for_update()
+        action = self.db.scalar(query)
         if not action:
             raise AppError("RESOURCE_NOT_FOUND", "待确认动作不存在", status_code=404)
         return action
@@ -158,6 +178,86 @@ class PendingActionService:
             "created_at": action.created_at,
             "updated_at": action.updated_at,
         }
+
+    def _committed_response(self, action: AgentPendingAction) -> dict:
+        return {
+            "pending_action_id": action.id,
+            "status": action.status,
+            "record_type": action.committed_record_type or "",
+            "record_id": action.committed_record_id or "",
+        }
+
+    def _add_action_event(
+        self,
+        action: AgentPendingAction,
+        event_type: str,
+        text: str,
+        record_type: str | None = None,
+        record_id: str | None = None,
+    ) -> None:
+        content: dict[str, Any] = {
+            "type": "event",
+            "event_type": event_type,
+            "text": text,
+            "pending_action_id": action.id,
+        }
+        if record_type:
+            content["record_type"] = record_type
+        if record_id:
+            content["record_id"] = record_id
+        self.db.add(
+            ConversationMessage(
+                id=new_id("msg"),
+                conversation_id=action.conversation_id,
+                user_id=action.user_id,
+                role="assistant",
+                content_json=[content],
+                intent="fitness_record",
+                requires_review=False,
+                created_at=utc_now(),
+            )
+        )
+
+    def _record_committed_text(self, record_type: str, record: dict) -> str:
+        if record_type == "meal":
+            meal_label = self._meal_type_label(record.get("meal_type"))
+            item_text = self._meal_items_text(record.get("items") or [])
+            total = record.get("total_calories")
+            total_text = f"，约 {total:g} 千卡" if isinstance(total, (int, float)) else ""
+            if item_text:
+                return f"已保存到正式记录：{meal_label}，{item_text}{total_text}。"
+            return f"已保存到正式记录：{meal_label}{total_text}。"
+
+        parts = []
+        if record.get("weight_kg") is not None:
+            parts.append(f"体重 {record['weight_kg']:g}kg")
+        if record.get("body_fat_percentage") is not None:
+            parts.append(f"体脂 {record['body_fat_percentage']:g}%")
+        if record.get("bmi") is not None:
+            parts.append(f"BMI {record['bmi']:g}")
+        detail = "，".join(parts) if parts else "身体指标"
+        return f"已保存到正式记录：{detail}。"
+
+    def _meal_items_text(self, items: list[dict]) -> str:
+        parts = []
+        for item in items[:5]:
+            name = item.get("name")
+            if not name:
+                continue
+            portion = item.get("portion_text")
+            parts.append(f"{name}（{portion}）" if portion else str(name))
+        if len(items) > 5:
+            parts.append(f"等 {len(items)} 项")
+        return "、".join(parts)
+
+    def _meal_type_label(self, meal_type: str | None) -> str:
+        return {
+            "breakfast": "早餐",
+            "lunch": "午餐",
+            "dinner": "晚餐",
+            "snack": "加餐",
+            "unknown": "餐食",
+        }.get(meal_type or "unknown", "餐食")
 
 
 def get_pending_action_service(

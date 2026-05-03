@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any
 
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from app.models import (
     BodyMetricRecord,
     ConversationMessage,
     ConversationSummary,
+    MealItem,
     MealRecord,
     UserProfile,
 )
@@ -137,8 +139,8 @@ class ConversationContextBuilder:
         return {
             "id": message.id,
             "role": message.role,
-            "content": message.content_json,
             "content_preview": content_preview(message.content_json),
+            "content_types": content_types(message.content_json),
             "intent": message.intent,
             "requires_review": message.requires_review,
             "created_at": _iso_or_none(message.created_at),
@@ -177,6 +179,7 @@ class ConversationContextBuilder:
                 .limit(CONTEXT_RECORD_LIMIT)
             )
         )
+        meal_items_by_id = self._meal_items_by_meal_id([meal.id for meal in meals])
         body_metrics = list(
             self.db.scalars(
                 select(BodyMetricRecord)
@@ -190,26 +193,80 @@ class ConversationContextBuilder:
         )
         return {
             "meals": [
-                {
-                    "id": meal.id,
-                    "recorded_at": _iso_or_none(meal.recorded_at),
-                    "local_date": _iso_or_none(meal.local_date),
-                    "meal_type": meal.meal_type,
-                    "total_calories": _float_or_none(meal.total_calories),
-                    "total_protein_g": _float_or_none(meal.total_protein_g),
-                }
+                self._meal_record_context(meal, meal_items_by_id.get(meal.id, []))
                 for meal in meals
             ],
             "body_metrics": [
-                {
-                    "id": record.id,
-                    "recorded_at": _iso_or_none(record.recorded_at),
-                    "local_date": _iso_or_none(record.local_date),
-                    "weight_kg": _float_or_none(record.weight_kg),
-                    "body_fat_percentage": _float_or_none(record.body_fat_percentage),
-                }
+                self._body_metric_context(record)
                 for record in body_metrics
             ],
+        }
+
+    def _meal_items_by_meal_id(self, meal_ids: list[str]) -> dict[str, list[MealItem]]:
+        if not meal_ids:
+            return {}
+        grouped: dict[str, list[MealItem]] = defaultdict(list)
+        items = list(
+            self.db.scalars(
+                select(MealItem)
+                .where(MealItem.meal_record_id.in_(meal_ids))
+                .order_by(
+                    MealItem.meal_record_id.asc(),
+                    MealItem.display_order.asc(),
+                    MealItem.created_at.asc(),
+                )
+            )
+        )
+        for item in items:
+            grouped[item.meal_record_id].append(item)
+        return grouped
+
+    def _meal_record_context(self, meal: MealRecord, items: list[MealItem]) -> dict[str, Any]:
+        return {
+            "id": meal.id,
+            "recorded_at": _iso_or_none(meal.recorded_at),
+            "recorded_tz": meal.recorded_tz,
+            "local_date": _iso_or_none(meal.local_date),
+            "source_type": meal.source_type,
+            "meal_type": meal.meal_type,
+            "total_calories": _float_or_none(meal.total_calories),
+            "total_protein_g": _float_or_none(meal.total_protein_g),
+            "total_carbs_g": _float_or_none(meal.total_carbs_g),
+            "total_fat_g": _float_or_none(meal.total_fat_g),
+            "confidence": _float_or_none(meal.confidence),
+            "source_pending_action_id": meal.source_pending_action_id,
+            "notes": meal.notes,
+            "items": [
+                {
+                    "name": item.name,
+                    "alias": item.alias,
+                    "portion_text": item.portion_text,
+                    "portion_grams": _float_or_none(item.portion_grams),
+                    "calories": _float_or_none(item.calories),
+                    "protein_g": _float_or_none(item.protein_g),
+                    "carbs_g": _float_or_none(item.carbs_g),
+                    "fat_g": _float_or_none(item.fat_g),
+                    "confidence": _float_or_none(item.confidence),
+                    "user_corrected": item.user_corrected,
+                }
+                for item in items
+            ],
+        }
+
+    def _body_metric_context(self, record: BodyMetricRecord) -> dict[str, Any]:
+        return {
+            "id": record.id,
+            "recorded_at": _iso_or_none(record.recorded_at),
+            "recorded_tz": record.recorded_tz,
+            "local_date": _iso_or_none(record.local_date),
+            "source_type": record.source_type,
+            "weight_kg": _float_or_none(record.weight_kg),
+            "body_fat_percentage": _float_or_none(record.body_fat_percentage),
+            "bmi": _float_or_none(record.bmi),
+            "muscle_mass_kg": _float_or_none(record.muscle_mass_kg),
+            "water_percentage": _float_or_none(record.water_percentage),
+            "confidence": _float_or_none(record.confidence),
+            "source_pending_action_id": record.source_pending_action_id,
         }
 
 
@@ -289,6 +346,8 @@ def content_preview(content_json: Any, max_chars: int = 240) -> str:
         item_type = item.get("type")
         if item_type == "text":
             parts.append(str(item.get("text") or ""))
+        elif item_type == "event":
+            parts.append(str(item.get("text") or item.get("event_type") or "[event]"))
         elif item_type == "image":
             parts.append("[image]")
         elif item_type == "audio":
@@ -297,6 +356,16 @@ def content_preview(content_json: Any, max_chars: int = 240) -> str:
         else:
             parts.append(f"[{item_type or 'content'}]")
     return truncate_text(" ".join(part.strip() for part in parts if part), max_chars)
+
+
+def content_types(content_json: Any) -> list[str]:
+    if not isinstance(content_json, list):
+        return []
+    types = []
+    for item in content_json:
+        if isinstance(item, dict) and item.get("type"):
+            types.append(str(item["type"]))
+    return sorted(set(types))
 
 
 def truncate_text(value: str, max_chars: int) -> str:

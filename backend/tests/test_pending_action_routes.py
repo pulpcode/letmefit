@@ -4,7 +4,7 @@ from app.auth.dependencies import get_current_user
 from app.main import create_app
 from app.models import User
 from app.schemas.pending_action import PendingActionUpdateRequest
-from app.services.pending_actions import get_pending_action_service
+from app.services.pending_actions import PendingActionService, get_pending_action_service
 
 
 class FakePendingActionService:
@@ -102,3 +102,18 @@ def test_confirm_and_discard_pending_action() -> None:
         ("confirm", "user_test", "pa_test"),
         ("discard", "user_test", "pa_other"),
     ]
+
+
+def test_committed_event_text_summarizes_meal_items() -> None:
+    service = PendingActionService(db=object())
+
+    text = service._record_committed_text(
+        "meal",
+        {
+            "meal_type": "breakfast",
+            "total_calories": 156.0,
+            "items": [{"name": "鸡蛋", "portion_text": "2个"}],
+        },
+    )
+
+    assert text == "已保存到正式记录：早餐，鸡蛋（2个），约 156 千卡。"

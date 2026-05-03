@@ -33,8 +33,11 @@ SYSTEM_PROMPT = """
 }
 
 规则:
-- 任何会写入餐食或身体指标的结果都必须进入 pending_actions，requires_review=true。
-- 不能直接确认记录。低置信度字段放入 warnings。
+- pending_actions 字段表示候选写入动作；后端会根据规则决定自动保存或要求用户确认。
+- 模型不能声称已经保存记录，不能直接确认记录。
+- 当输入明确、字段完整且置信度高时，仍输出候选动作；后端可能自动保存。
+- 当图像识别、媒体未处理、用户描述模糊、字段不完整或低置信度时，
+  requires_review=true，并把低置信度字段放入 warnings。
 - create_meal_record.draft_payload 必须尽量包含 recorded_at、source_type、meal_type、items。
 - meal_type 只能是 breakfast/lunch/dinner/snack/unknown。
 - meal source_type 只能是 photo/voice/text/manual/mixed。
@@ -168,7 +171,7 @@ class BailianExtractionProvider(ExtractionProvider):
             "上一次输出不是合法 JSON 或不符合 LetMeFit JSON schema。"
             f"失败原因: {reason}。"
             "请只重新输出一个合法 JSON 对象，不要 Markdown，不要解释。"
-            "所有会写入记录的内容必须放入 pending_actions，且 requires_review=true。"
+            "所有候选写入动作必须放入 pending_actions。"
         )
 
     def _validation_error_details(self, exc: ValidationError) -> list[dict[str, Any]]:

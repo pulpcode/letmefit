@@ -89,6 +89,9 @@ class ConversationService:
         self.db.flush()
         media_files = self._add_message_attachments(user_id, user_message.id, payload.content)
         normalized_input = self.input_normalizer.normalize(payload.content, media_files)
+        user_message.content_json = [
+            item.model_dump(mode="json", exclude_none=True) for item in normalized_input.content
+        ]
         context = self.context_builder.build(
             user_id=user_id,
             conversation_id=conversation.id,
@@ -118,7 +121,8 @@ class ConversationService:
             conversation_id=conversation.id,
             user_id=user_id,
             role="assistant",
-            content_json=[{"type": "text", "text": extraction_result["assistant_text"]}],
+            content_json=extraction_result.get("assistant_content")
+            or [{"type": "text", "text": extraction_result["assistant_text"]}],
             intent=extraction_result["intent"],
             requires_review=extraction_result["requires_review"],
             created_at=utc_now(),
@@ -138,6 +142,7 @@ class ConversationService:
             "intent": extraction_result["intent"],
             "requires_review": extraction_result["requires_review"],
             "pending_actions": extraction_result["pending_actions"],
+            "committed_records": extraction_result["committed_records"],
         }
         if debug_context is not None:
             response["debug_context"] = debug_context

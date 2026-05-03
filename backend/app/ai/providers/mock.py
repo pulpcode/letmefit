@@ -80,6 +80,25 @@ class MockExtractionProvider(ExtractionProvider):
             meal_type = "snack"
 
         confidence = Decimal("0.45") if has_image else Decimal("0.50")
+        items = self._extract_gram_items(text)
+        if items and not has_image:
+            confidence = Decimal("0.90")
+            warnings = []
+        else:
+            items = [
+                {
+                    "name": "待确认食物",
+                    "portion_text": "待确认",
+                    "confidence": 0.3,
+                    "user_corrected": False,
+                }
+            ]
+            warnings = [
+                {
+                    "field": "items",
+                    "reason": "mock_extraction_requires_user_confirmation",
+                }
+            ]
         return ExtractionActionSpec(
             action_type="create_meal_record",
             confidence=confidence,
@@ -87,27 +106,15 @@ class MockExtractionProvider(ExtractionProvider):
                 "recorded_at": self._now_iso(),
                 "source_type": "photo" if has_image else "text",
                 "meal_type": meal_type,
-                "items": [
-                    {
-                        "name": "待确认食物",
-                        "portion_text": "待确认",
-                        "confidence": 0.3,
-                        "user_corrected": False,
-                    }
-                ],
+                "items": items,
                 "confidence": float(confidence),
             },
-            warnings=[
-                {
-                    "field": "items",
-                    "reason": "mock_extraction_requires_user_confirmation",
-                }
-            ],
+            warnings=warnings,
         )
 
     def _body_metric_spec(self, text: str) -> ExtractionActionSpec:
         weight_kg = self._extract_weight_kg(text)
-        confidence = Decimal("0.65") if weight_kg is not None else Decimal("0.35")
+        confidence = Decimal("0.90") if weight_kg is not None else Decimal("0.35")
         draft_payload: dict[str, Any] = {
             "recorded_at": self._now_iso(),
             "source_type": "text",
@@ -125,6 +132,33 @@ class MockExtractionProvider(ExtractionProvider):
             draft_payload=draft_payload,
             warnings=warnings,
         )
+
+    def _extract_gram_items(self, text: str) -> list[dict[str, Any]]:
+        items = []
+        for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(?:克|g)\s*([a-zA-Z\u4e00-\u9fff]+)", text):
+            grams = float(match.group(1))
+            name = self._clean_food_name(match.group(2))
+            if name:
+                items.append(
+                    {
+                        "name": name,
+                        "portion_text": f"{grams:g}g",
+                        "portion_grams": grams,
+                        "confidence": 0.9,
+                        "user_corrected": False,
+                    }
+                )
+        return items
+
+    def _clean_food_name(self, value: str) -> str:
+        value = value.strip(" ，,。.;；、")
+        for prefix in ("的",):
+            if value.startswith(prefix):
+                value = value[len(prefix) :]
+        for suffix in ("和", "以及", "还有"):
+            if value.endswith(suffix):
+                value = value[: -len(suffix)]
+        return value.strip(" ，,。.;；、")
 
     def _assistant_text(self, action_specs: list[ExtractionActionSpec]) -> str:
         if len(action_specs) == 1 and action_specs[0].action_type == "create_meal_record":

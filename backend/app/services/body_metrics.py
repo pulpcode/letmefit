@@ -49,7 +49,12 @@ class BodyMetricService:
     def get_body_metric(self, user_id: str, body_metric_id: str) -> dict:
         return self._response(self._get_owned_body_metric(user_id, body_metric_id))
 
-    def create_body_metric(self, user_id: str, payload: BodyMetricCreateRequest) -> dict:
+    def create_body_metric(
+        self,
+        user_id: str,
+        payload: BodyMetricCreateRequest,
+        commit: bool = True,
+    ) -> dict:
         recorded_at, local_date = normalize_recorded_time(payload.recorded_at, payload.recorded_tz)
         record = BodyMetricRecord(
             id=new_id("bm"),
@@ -67,8 +72,10 @@ class BodyMetricService:
             source_pending_action_id=payload.source_pending_action_id,
         )
         self.db.add(record)
-        self.db.commit()
-        self.db.refresh(record)
+        self.db.flush()
+        if commit:
+            self.db.commit()
+            self.db.refresh(record)
         return self._response(record)
 
     def update_body_metric(

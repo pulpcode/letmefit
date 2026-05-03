@@ -2,9 +2,9 @@
 
 ## Purpose
 
-LLM output is only used to create conversation pending actions. It must not write formal records directly.
+LLM output is only used to create backend-validated candidate record actions. It must not write formal records directly.
 
-The backend stores LLM output in `agent_extractions`, then creates `agent_pending_actions`. Formal records are written only after user confirmation.
+The backend stores LLM output in `agent_extractions`, then applies backend commit rules. Clear low-risk actions may be committed automatically; ambiguous or low-confidence actions become `agent_pending_actions` and require user confirmation.
 
 ## Provider
 
@@ -38,7 +38,7 @@ Backend validation:
 - The provider must parse the model response with `json.loads`.
 - The parsed object must pass the backend Pydantic `ExtractionOutput` schema.
 - If JSON parsing or schema validation fails, the provider may issue one repair request.
-- Invalid model output must not create `agent_extractions` or `agent_pending_actions`.
+- Invalid model output must not create `agent_extractions`, `agent_pending_actions`, or formal records.
 - If `conversation_context.input_normalization.media[].status` is `unprocessed`, the provider must not infer media contents from the file reference alone.
 
 ## Top-Level Output
@@ -60,10 +60,10 @@ Fields:
 
 - `assistant_text`: user-facing response text
 - `intent`: one of `fitness_record`, `answer_fitness_question`, `out_of_scope`
-- `requires_review`: true when `pending_actions` is not empty
+- `requires_review`: model-side hint; backend makes the final confirmation decision
 - `confidence`: 0-1 model confidence
 - `warnings`: low-confidence or missing-field warnings
-- `pending_actions`: actions requiring user confirmation
+- `pending_actions`: candidate write actions; backend may auto-commit clear actions or create pending actions
 
 ## Pending Action Types
 

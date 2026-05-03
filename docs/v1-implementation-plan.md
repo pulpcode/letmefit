@@ -46,7 +46,7 @@ V1 采用前后端分离架构。客户端规划覆盖 iOS App 与微信小程�
 
 ### 3.1 必须完成
 
-- 首个客户端核心闭环，当前默认 iOS App，最终以 Figma 原型与产品决策为准
+- 首个客户端核心闭环，当前为微信小程序，基于 Figma Make 原型实现
 - 云端后端服务
 - 手机号短信注册/登录
 - JWT API 认证
@@ -477,7 +477,7 @@ V1 必须内置以下规则：
 2. 完成后端 API 文档
 3. 搭建云端后端基础工程、数据库、短信服务和 JWT 认证
 4. 基于 Figma 确认首个客户端 UI 与核心页面流
-5. 选择 iOS App 或微信小程序中的一个客户端实现
+5. 实现微信小程序客户端
 6. 接入最小 AI 提取链路
 7. 跑通端到端记录闭环
 8. 再优化识别质量、记忆和总结体验
@@ -536,12 +536,14 @@ miniprogram/
     login/
     onboarding/
     home/
-    capture/
-    review/
+    records/
+    chat/
     summary/
+    profile/
   components/
   services/
-  models/
+  types/
+  utils/
 ```
 
 部署初始模块：
@@ -676,7 +678,7 @@ infra/
 5. 输出 AI JSON Schema 草案
 6. 实现后端工程骨架与核心 API
 7. 基于 Figma 完成首个客户端 UI 设计确认
-8. 选择 iOS App 或微信小程序中的一个客户端实现
+8. 实现微信小程序客户端
 9. 第二客户端在核心闭环稳定后再评估启动
 
 ## 12. 当前优先级判断

@@ -22,7 +22,7 @@ MySQL 驱动：PyMySQL
 部署：腾讯云 4 核 4G 云服务器；后端用 uv + systemd 运行，MySQL/Redis 用 Docker Compose，Nginx 可选
 媒体存储：本地开发/测试可使用客户端本地或服务端本地存储，生产建议 S3 兼容对象存储
 API 文档：OpenAPI 自动文档 + docs/backend-api-v1.md
-首个客户端：iOS App 暂定，最终以 Figma 原型和产品决策为准
+首个客户端：微信小程序，基于 Figma Make 原型实现
 Agent 框架：V1 自研轻量编排，暂不引入 LangChain/LangGraph/Deep Agents
 ```
 
@@ -33,7 +33,7 @@ Agent 框架：V1 自研轻量编排，暂不引入 LangChain/LangGraph/Deep Age
 3. 完成后端 API 文档
 4. 实现后端核心 API
 5. 基于 Figma 确认首个客户端 UI
-6. 实现 iOS App 或微信小程序中的一个客户端
+6. 实现微信小程序客户端
 7. 接入真实 AI 能力
 8. 评估是否启动第二客户端
 
@@ -41,7 +41,7 @@ Agent 框架：V1 自研轻量编排，暂不引入 LangChain/LangGraph/Deep Age
 
 ```text
 首个客户端
-  iOS App 或微信小程序
+  微信小程序
         |
         | HTTPS REST/JSON
         v
@@ -304,13 +304,13 @@ ASR 第一版真实 provider 使用百炼/DashScope Paraformer 录音文件识�
 
 iOS App 与微信小程序都在产品规划内，但 V1 不并行实现两个客户端。
 
-当前默认首个客户端为 iOS App，原因：
+当前首个客户端为微信小程序，原因：
 
-- 原生拍照、语音、权限和本地草稿体验更可控
-- 适合先验证完整记录体验
-- Figma 原型可直接映射到原生页面结构
+- 已有 Figma Make 高保真小程序原型
+- 适合低门槛传播和微信生态触达
+- 可以先验证短信登录、记录、确认、总结的完整闭环
 
-如果产品决策更重视低门槛传播和微信生态触达，可以将首个客户端切换为微信小程序。无论选择哪一个，后端 API 不应绑定具体客户端。
+iOS App 在核心闭环稳定后再启动。无论后续是否启动第二客户端，后端 API 不应绑定具体客户端。
 
 ## 9. UI 与 Figma
 
@@ -357,7 +357,7 @@ Nginx 是否引入按阶段判断：
 
 ## 11. 后续待决
 
-- 首个客户端最终选择 iOS App 还是微信小程序
+- 微信小程序首个客户端的真实设备联调与发布范围
 - 媒体文件存储阶段策略与对象存储服务
 - 营养数据源
 - AI 服务商与模型调用策略，尤其是 ASR 与图片理解模型

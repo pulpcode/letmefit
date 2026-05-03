@@ -69,6 +69,31 @@ DASHSCOPE_ASR_LANGUAGE_HINTS=zh,en
 
 DashScope recording-file ASR requires a public HTTP/HTTPS audio URL or supported OSS URL. `client_local` audio remains unprocessed until the client uploads a server-accessible temporary file.
 
+First-stage OSS URL smoke test:
+
+```bash
+cd backend
+ASR_PROVIDER=dashscope_recording uv run python scripts/asr_smoke_from_csv.py ../sounds/export_urls.csv
+```
+
+The CSV must contain `object,url` columns. The script does not print signed URLs; it prints each object name, ASR status, and transcript or warning reason.
+
+Server API smoke test, after deploying the backend:
+
+```bash
+cd backend
+LETMEFIT_API_BASE_URL=https://www.letmefit.cloud/v1 \
+uv run python scripts/api_asr_smoke_from_csv.py ../sounds/export_urls.csv
+```
+
+By default this logs in with the mock SMS code `123456`. For an environment that uses real SMS, pass an existing JWT:
+
+```bash
+uv run python scripts/api_asr_smoke_from_csv.py ../sounds/export_urls.csv \
+  --base-url https://www.letmefit.cloud/v1 \
+  --access-token "$LETMEFIT_ACCESS_TOKEN"
+```
+
 ## Database Services
 
 ```bash

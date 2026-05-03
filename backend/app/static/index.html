@@ -317,6 +317,42 @@
         </section>
 
         <section>
+          <h2>OSS 语音识别</h2>
+          <div class="grid">
+            <label>
+              音频类型
+              <select id="audioKind">
+                <option value="meal">餐食语音</option>
+                <option value="body_metric">身体指标语音</option>
+              </select>
+            </label>
+            <label>
+              MIME
+              <input id="audioMime" value="audio/mp4" />
+            </label>
+          </div>
+          <label style="margin-top: 12px">
+            OSS 音频 URL
+            <textarea id="audioUrl">https://fit-app-test.oss-cn-beijing.aliyuncs.com/local-test/eat.m4a</textarea>
+          </label>
+          <div class="actions">
+            <button id="createAudioUpload">创建 OSS Upload</button>
+            <button id="sendAudioMessage">发送语音消息</button>
+            <button id="runAudioSmoke">一键语音测试</button>
+          </div>
+          <div class="grid" style="margin-top: 12px">
+            <label>
+              Audio File ID
+              <input id="audioFileId" />
+            </label>
+            <label>
+              语音时长秒
+              <input id="audioDuration" type="number" value="10" />
+            </label>
+          </div>
+        </section>
+
+        <section>
           <h2>记录查询</h2>
           <div class="actions">
             <button class="secondary" id="listMeals">查询餐食</button>
@@ -393,6 +429,10 @@
           localStorage.removeItem("letmefit_pending_action_id");
         }
         updateState();
+      }
+
+      function saveAudioFileId(value) {
+        $("audioFileId").value = value || "";
       }
 
       function log(value) {
@@ -554,6 +594,97 @@
             savePendingActionId(action.pending_action_id);
           }
           return response;
+        });
+
+      function audioPrompt() {
+        if ($("audioKind").value === "body_metric") {
+          return "这是一段身体指标语音，请转写并整理成待确认记录。";
+        }
+        return "这是一段餐食语音，请转写并整理成待确认记录。";
+      }
+
+      $("createAudioUpload").onclick = () =>
+        run(async () => {
+          const response = await api("/uploads", {
+            method: "POST",
+            body: {
+              storage_provider: "oss",
+              object_key: $("audioUrl").value.trim(),
+              mime_type: $("audioMime").value.trim() || "audio/mp4",
+              source: "microphone",
+              retention_policy: "transient",
+            },
+          });
+          saveAudioFileId(response.data.file.id);
+          return response;
+        });
+
+      $("sendAudioMessage").onclick = () =>
+        run(async () => {
+          const conversationId = $("conversationId").value;
+          const fileId = $("audioFileId").value;
+          const response = await api(`/conversations/${conversationId}/messages`, {
+            method: "POST",
+            body: {
+              content: [
+                { type: "text", text: audioPrompt() },
+                {
+                  type: "audio",
+                  file_id: fileId,
+                  duration_seconds: Number($("audioDuration").value || 10),
+                },
+              ],
+            },
+          });
+          const action = response.data.pending_actions?.[0];
+          if (action) {
+            savePendingActionId(action.pending_action_id);
+          }
+          return response;
+        });
+
+      $("runAudioSmoke").onclick = () =>
+        run(async () => {
+          if (!$("conversationId").value) {
+            const conversationResponse = await api("/conversations", {
+              method: "POST",
+              body: { title: "静态页 OSS 语音测试" },
+            });
+            saveConversationId(conversationResponse.data.conversation_id);
+          }
+          const uploadResponse = await api("/uploads", {
+            method: "POST",
+            body: {
+              storage_provider: "oss",
+              object_key: $("audioUrl").value.trim(),
+              mime_type: $("audioMime").value.trim() || "audio/mp4",
+              source: "microphone",
+              retention_policy: "transient",
+            },
+          });
+          saveAudioFileId(uploadResponse.data.file.id);
+
+          const messageResponse = await api(`/conversations/${$("conversationId").value}/messages`, {
+            method: "POST",
+            body: {
+              content: [
+                { type: "text", text: audioPrompt() },
+                {
+                  type: "audio",
+                  file_id: uploadResponse.data.file.id,
+                  duration_seconds: Number($("audioDuration").value || 10),
+                },
+              ],
+            },
+          });
+          const action = messageResponse.data.pending_actions?.[0];
+          if (action) {
+            savePendingActionId(action.pending_action_id);
+          }
+          return {
+            upload: uploadResponse.data.file,
+            message: messageResponse.data,
+          };
         });
 
       $("listPending").onclick = () =>

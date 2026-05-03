@@ -143,7 +143,11 @@ class DashScopeRecordingSpeechToTextProvider:
             transcript_data = self.http_client.get_json(transcription_url)
             transcript = self._transcript_text(transcript_data)
         except (KeyError, TypeError, ValueError, URLError, TimeoutError) as exc:
-            return self._warning_result(media, "asr_provider_error", error=exc.__class__.__name__)
+            return self._warning_result(
+                media,
+                "asr_provider_error",
+                error=f"{exc.__class__.__name__}: {exc}",
+            )
 
         if not transcript:
             return self._warning_result(media, "asr_empty_transcript", task_id)

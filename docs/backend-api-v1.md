@@ -639,6 +639,7 @@ Agent 接口可以返回自然语言回复，也可以返回结构化待确认�
 
 ```json
 {
+  "include_debug_context": false,
   "content": [
     {
       "type": "text",
@@ -657,6 +658,10 @@ Agent 接口可以返回自然语言回复，也可以返回结构化待确认�
   ]
 }
 ```
+
+字段说明：
+
+- `include_debug_context` 默认为 `false`。仅用于服务器联调或静态测试页；设为 `true` 时，响应会附带本次传给 LLM 的调试上下文预览。
 
 响应：
 
@@ -688,6 +693,32 @@ Agent 接口可以返回自然语言回复，也可以返回结构化待确认�
     ]
   },
   "request_id": "req_..."
+}
+```
+
+当 `include_debug_context=true` 时，`data` 会额外包含 `debug_context`，用于查看本次归一化后的输入和传给 LLM 的上下文：
+
+```json
+{
+  "debug_context": {
+    "provider": "bailian",
+    "normalized_content": [
+      {
+        "type": "text",
+        "text": "语音转写: 今天早餐吃了两个鸡蛋"
+      }
+    ],
+    "conversation_context": {
+      "profile": {},
+      "input_normalization": {
+        "media": []
+      }
+    },
+    "llm_user_prompt_payload": {
+      "message_content": [],
+      "conversation_context": {}
+    }
+  }
 }
 ```
 

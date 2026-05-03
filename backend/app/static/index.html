@@ -107,6 +107,18 @@
         font: inherit;
       }
 
+      label.checkbox {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+        font-size: 13px;
+      }
+
+      label.checkbox input {
+        width: auto;
+      }
+
       textarea {
         min-height: 92px;
         resize: vertical;
@@ -296,6 +308,10 @@
             消息
             <textarea id="messageText">今天午餐吃了鸡胸肉和一碗米饭，体重72.4公斤</textarea>
           </label>
+          <label class="checkbox">
+            <input id="includeDebugContext" type="checkbox" checked />
+            显示 LLM 上下文
+          </label>
           <div class="grid" style="margin-top: 12px">
             <label>
               Pending Action ID
@@ -433,6 +449,10 @@
 
       function saveAudioFileId(value) {
         $("audioFileId").value = value || "";
+      }
+
+      function includeDebugContext() {
+        return $("includeDebugContext").checked;
       }
 
       function log(value) {
@@ -587,7 +607,10 @@
           const conversationId = $("conversationId").value;
           const response = await api(`/conversations/${conversationId}/messages`, {
             method: "POST",
-            body: { content: [{ type: "text", text: $("messageText").value }] },
+            body: {
+              content: [{ type: "text", text: $("messageText").value }],
+              include_debug_context: includeDebugContext(),
+            },
           });
           const action = response.data.pending_actions?.[0];
           if (action) {
@@ -626,6 +649,7 @@
           const response = await api(`/conversations/${conversationId}/messages`, {
             method: "POST",
             body: {
+              include_debug_context: includeDebugContext(),
               content: [
                 { type: "text", text: audioPrompt() },
                 {
@@ -667,6 +691,7 @@
           const messageResponse = await api(`/conversations/${$("conversationId").value}/messages`, {
             method: "POST",
             body: {
+              include_debug_context: includeDebugContext(),
               content: [
                 { type: "text", text: audioPrompt() },
                 {

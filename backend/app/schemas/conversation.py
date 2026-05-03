@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,7 @@ class ConversationListResponse(BaseModel):
 
 class MessageCreateRequest(BaseModel):
     content: list[MessageContentItem] = Field(min_length=1, max_length=20)
+    include_debug_context: bool = False
 
 
 class ConversationMessageResponse(BaseModel):
@@ -53,3 +54,4 @@ class MessageSendResponse(BaseModel):
     intent: str
     requires_review: bool
     pending_actions: list[dict]
+    debug_context: dict[str, Any] | None = None

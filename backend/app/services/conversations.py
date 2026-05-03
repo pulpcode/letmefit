@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.extraction_service import ExtractionService
 from app.ai.input_normalizer import InputNormalizer
+from app.ai.prompt_payload import build_extraction_user_prompt_payload
+from app.ai.types import ExtractionInput
 from app.auth.security import new_id, utc_now
 from app.core.database import get_db
 from app.core.errors import AppError
@@ -94,11 +96,22 @@ class ConversationService:
         )
         context["input_normalization"] = normalized_input.context
 
-        extraction_result = self.extraction_service.process_message(
+        extraction_input = ExtractionInput(
             user_id=user_id,
             conversation_id=conversation.id,
             message_id=user_message.id,
             content=normalized_input.content,
+            context=context,
+        )
+        debug_context = (
+            self._debug_context(extraction_input) if payload.include_debug_context else None
+        )
+
+        extraction_result = self.extraction_service.process_message(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            message_id=user_message.id,
+            content=extraction_input.content,
             context=context,
         )
         assistant_message = ConversationMessage(
@@ -119,13 +132,27 @@ class ConversationService:
         self.summary_service.compact_if_needed(user_id, conversation.id)
         self.db.commit()
 
-        return {
+        response = {
             "message_id": user_message.id,
             "assistant_message_id": assistant_message.id,
             "assistant_text": extraction_result["assistant_text"],
             "intent": extraction_result["intent"],
             "requires_review": extraction_result["requires_review"],
             "pending_actions": extraction_result["pending_actions"],
+        }
+        if debug_context is not None:
+            response["debug_context"] = debug_context
+        return response
+
+    def _debug_context(self, extraction_input: ExtractionInput) -> dict[str, Any]:
+        normalized_content = [
+            item.model_dump(mode="json", exclude_none=True) for item in extraction_input.content
+        ]
+        return {
+            "provider": self.extraction_service.provider.provider_name,
+            "normalized_content": normalized_content,
+            "conversation_context": extraction_input.context,
+            "llm_user_prompt_payload": build_extraction_user_prompt_payload(extraction_input),
         }
 
     def _add_message_attachments(

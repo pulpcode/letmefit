@@ -11,6 +11,7 @@ from app.services.pending_actions import get_pending_action_service
 class FakeConversationService:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        self.debug_flags: list[bool] = []
 
     def create_conversation(self, user_id: str, payload: ConversationCreateRequest) -> dict:
         self.calls.append(("create", user_id, payload.title))
@@ -30,7 +31,8 @@ class FakeConversationService:
         payload: MessageCreateRequest,
     ) -> dict:
         self.calls.append(("send", user_id, conversation_id, payload.content[0].type))
-        return {
+        self.debug_flags.append(payload.include_debug_context)
+        response = {
             "message_id": "msg_user",
             "assistant_message_id": "msg_assistant",
             "assistant_text": "我先整理成一条餐食记录草稿，请确认或修改后再保存。",
@@ -47,6 +49,17 @@ class FakeConversationService:
                 }
             ],
         }
+        if payload.include_debug_context:
+            response["debug_context"] = {
+                "provider": "mock",
+                "normalized_content": [{"type": "text", "text": "今天午餐吃了鸡胸肉"}],
+                "conversation_context": {"input_normalization": {"media": []}},
+                "llm_user_prompt_payload": {
+                    "message_content": [{"type": "text", "text": "今天午餐吃了鸡胸肉"}],
+                    "conversation_context": {"input_normalization": {"media": []}},
+                },
+            }
+        return response
 
     def list_messages(self, user_id: str, conversation_id: str) -> dict:
         self.calls.append(("messages", user_id, conversation_id))
@@ -151,7 +164,31 @@ def test_send_message_returns_pending_actions() -> None:
     assert body["data"]["message_id"] == "msg_user"
     assert body["data"]["requires_review"] is True
     assert body["data"]["pending_actions"][0]["pending_action_id"] == "pa_test"
+    assert "debug_context" not in body["data"]
     assert service.calls[0] == ("send", "user_test", "conv_test", "text")
+    assert service.debug_flags == [False]
+
+
+def test_send_message_can_request_debug_context() -> None:
+    service = FakeConversationService()
+    client = TestClient(_authorized_app(service))
+
+    response = client.post(
+        "/v1/conversations/conv_test/messages",
+        json={
+            "content": [{"type": "text", "text": "今天午餐吃了鸡胸肉"}],
+            "include_debug_context": True,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["debug_context"]["provider"] == "mock"
+    assert data["debug_context"]["normalized_content"][0]["text"] == "今天午餐吃了鸡胸肉"
+    assert data["debug_context"]["llm_user_prompt_payload"]["conversation_context"] == {
+        "input_normalization": {"media": []}
+    }
+    assert service.debug_flags == [True]
 
 
 def test_list_messages_and_pending_actions_use_conversation_id() -> None:

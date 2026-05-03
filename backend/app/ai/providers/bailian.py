@@ -1,11 +1,11 @@
 import json
-from datetime import UTC, datetime
 from typing import Any
 
 from openai import OpenAI, OpenAIError
 from pydantic import ValidationError
 
 from app.ai.output_schema import ExtractionOutput
+from app.ai.prompt_payload import build_extraction_user_prompt_payload
 from app.ai.providers.base import ExtractionProvider
 from app.ai.types import ExtractionInput, ExtractionProviderResult
 from app.core.config import Settings, get_settings
@@ -131,15 +131,7 @@ class BailianExtractionProvider(ExtractionProvider):
         return content
 
     def _user_prompt(self, payload: ExtractionInput) -> str:
-        content = [item.model_dump(mode="json", exclude_none=True) for item in payload.content]
-        request = {
-            "current_time": datetime.now(UTC).astimezone().isoformat(),
-            "input_types": sorted({item["type"] for item in content}),
-            "message_content": content,
-            "conversation_context": payload.context,
-            "output_language": "zh-CN",
-            "instruction": "请按 JSON schema 输出结构化提取结果。",
-        }
+        request = build_extraction_user_prompt_payload(payload)
         return json.dumps(request, ensure_ascii=False, default=str)
 
     def _parse_and_validate(self, content: str) -> ExtractionProviderResult:

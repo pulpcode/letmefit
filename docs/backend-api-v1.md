@@ -1076,6 +1076,38 @@ MEDIA_MAX_UPLOAD_BYTES=10485760
 }
 ```
 
+### POST /dev/reset-current-user-full
+
+清空当前登录用户的测试业务数据和用户档案，保留账号、登录态和短信事件。用于测试短信登录后重新进入首次建档流程。
+
+清理范围在 `POST /dev/reset-current-user` 基础上额外包含：
+
+- `user_profiles`
+
+响应：
+
+```json
+{
+  "data": {
+    "deleted": {
+      "conversations": 2,
+      "conversation_messages": 12,
+      "agent_pending_actions": 3,
+      "meal_records": 4,
+      "body_metric_records": 1,
+      "upload_files": 2,
+      "user_profiles": 1
+    },
+    "preserved": [
+      "users",
+      "refresh_sessions",
+      "sms_verification_events"
+    ]
+  },
+  "request_id": "req_..."
+}
+```
+
 ## 12. 后续补充
 
 - 分页规范

@@ -222,6 +222,7 @@
         </div>
         <div class="actions">
           <button class="secondary" id="resetUserData">清空当前用户测试数据</button>
+          <button class="secondary" id="resetUserDataFull">清空并重置档案</button>
           <button class="secondary" id="clearState">清空本地状态</button>
         </div>
       </div>
@@ -843,6 +844,18 @@
             return { cancelled: true };
           }
           const response = await api("/dev/reset-current-user", { method: "POST" });
+          saveConversationId("");
+          savePendingActionId("");
+          saveAudioFileId("");
+          return response;
+        });
+
+      $("resetUserDataFull").onclick = () =>
+        run(async () => {
+          if (!window.confirm("确认清空当前登录用户的测试业务数据和档案？账号和登录态会保留。")) {
+            return { cancelled: true };
+          }
+          const response = await api("/dev/reset-current-user-full", { method: "POST" });
           saveConversationId("");
           savePendingActionId("");
           saveAudioFileId("");

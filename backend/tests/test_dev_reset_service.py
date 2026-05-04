@@ -36,9 +36,13 @@ def test_dev_reset_rejects_non_dev_environment() -> None:
 
     with pytest.raises(AppError) as exc_info:
         service.reset_current_user("user_test")
+    with pytest.raises(AppError) as full_exc_info:
+        service.reset_current_user_full("user_test")
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.code == "RESOURCE_NOT_FOUND"
+    assert full_exc_info.value.status_code == 404
+    assert full_exc_info.value.code == "RESOURCE_NOT_FOUND"
 
 
 def test_dev_reset_deletes_user_business_tables_in_dependency_order() -> None:
@@ -70,6 +74,39 @@ def test_dev_reset_deletes_user_business_tables_in_dependency_order() -> None:
         "refresh_sessions",
         "sms_verification_events",
         "user_profiles",
+    ]
+    assert db.commit_count == 1
+    assert db.rollback_count == 0
+
+
+def test_dev_reset_full_also_deletes_profile() -> None:
+    db = FakeDb()
+    service = DevResetService(db=db, settings=_settings())
+
+    response = service.reset_current_user_full("user_test")
+
+    table_order = [statement.table.name for statement in db.statements]
+    assert table_order == [
+        "message_attachments",
+        "daily_summaries",
+        "daily_archives",
+        "user_memories",
+        "meal_items",
+        "meal_records",
+        "body_metric_records",
+        "agent_pending_actions",
+        "agent_extractions",
+        "conversation_summaries",
+        "conversation_messages",
+        "conversations",
+        "upload_files",
+        "user_profiles",
+    ]
+    assert response["deleted"]["user_profiles"] == 14
+    assert response["preserved"] == [
+        "users",
+        "refresh_sessions",
+        "sms_verification_events",
     ]
     assert db.commit_count == 1
     assert db.rollback_count == 0

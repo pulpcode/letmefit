@@ -18,3 +18,13 @@ def reset_current_user(
 ) -> dict:
     data = service.reset_current_user(current_user.id)
     return success_response(data, request)
+
+
+@router.post("/reset-current-user-full")
+def reset_current_user_full(
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[DevResetService, Depends(get_dev_reset_service)],
+) -> dict:
+    data = service.reset_current_user_full(current_user.id)
+    return success_response(data, request)

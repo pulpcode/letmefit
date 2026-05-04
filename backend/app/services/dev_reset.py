@@ -21,6 +21,7 @@ from app.models import (
     MessageAttachment,
     UploadFile,
     UserMemory,
+    UserProfile,
 )
 
 DEV_RESET_ENVIRONMENTS = {"local", "test"}
@@ -33,6 +34,13 @@ class DevResetService:
 
     def reset_current_user(self, user_id: str) -> dict:
         self._ensure_dev_environment()
+        return self._reset_current_user(user_id, include_profile=False)
+
+    def reset_current_user_full(self, user_id: str) -> dict:
+        self._ensure_dev_environment()
+        return self._reset_current_user(user_id, include_profile=True)
+
+    def _reset_current_user(self, user_id: str, include_profile: bool) -> dict:
         deleted: dict[str, int] = {}
         try:
             meal_ids = select(MealRecord.id).where(MealRecord.user_id == user_id)
@@ -79,19 +87,26 @@ class DevResetService:
             deleted["upload_files"] = self._delete(
                 delete(UploadFile).where(UploadFile.user_id == user_id)
             )
+            if include_profile:
+                deleted["user_profiles"] = self._delete(
+                    delete(UserProfile).where(UserProfile.user_id == user_id)
+                )
             self.db.commit()
         except Exception:
             self.db.rollback()
             raise
 
+        preserved = [
+            "users",
+            "refresh_sessions",
+            "sms_verification_events",
+        ]
+        if not include_profile:
+            preserved.append("user_profiles")
+
         return {
             "deleted": deleted,
-            "preserved": [
-                "users",
-                "refresh_sessions",
-                "sms_verification_events",
-                "user_profiles",
-            ],
+            "preserved": preserved,
         }
 
     def _ensure_dev_environment(self) -> None:

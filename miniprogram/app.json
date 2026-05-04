@@ -23,18 +23,26 @@
     "list": [
       {
         "pagePath": "pages/home/index",
+        "iconPath": "assets/icons/tab/home.png",
+        "selectedIconPath": "assets/icons/tab/home-active.png",
         "text": "今日"
       },
       {
         "pagePath": "pages/records/index",
+        "iconPath": "assets/icons/tab/records.png",
+        "selectedIconPath": "assets/icons/tab/records-active.png",
         "text": "记录"
       },
       {
         "pagePath": "pages/agent/index",
-        "text": "Agent"
+        "iconPath": "assets/icons/tab/chat.png",
+        "selectedIconPath": "assets/icons/tab/chat-active.png",
+        "text": "对话"
       },
       {
         "pagePath": "pages/profile/index",
+        "iconPath": "assets/icons/tab/user.png",
+        "selectedIconPath": "assets/icons/tab/user-active.png",
         "text": "我的"
       }
     ]

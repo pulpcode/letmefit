@@ -3,20 +3,24 @@
   <view class="chat-mask"></view>
 
   <view class="chat-header">
+    <button class="nav-icon nav-left">☰</button>
     <view class="agent-mini-avatar">
       <image src="{{avatarSrc}}" mode="aspectFill" />
     </view>
-    <view>
-      <text class="chat-title">LetMeFit Agent</text>
-      <text class="chat-subtitle">饮食、体重、总结与一般生活方式建议</text>
+    <view class="chat-title-block">
+      <text class="chat-title">健身助手</text>
+      <text class="chat-subtitle">对话 #1</text>
     </view>
+    <button class="nav-icon nav-right">⋮</button>
   </view>
 
   <scroll-view class="message-scroll" scroll-y scroll-into-view="{{scrollIntoView}}">
     <view class="message-list">
-      <view wx:if="{{!messages.length}}" class="empty-chat">
-        <image src="{{avatarSrc}}" mode="aspectFill" />
-        <text>告诉我你吃了什么、体重变化，或上传照片/语音。我会先整理成待确认记录。</text>
+      <view wx:if="{{!messages.length}}" class="message-row assistant welcome-message">
+        <image class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
+        <view class="bubble">
+          <text>你好！我是你的健康健身助手。你可以告诉我今天吃了什么，或者记录体重等身体指标。</text>
+        </view>
       </view>
 
       <view wx:for="{{messages}}" wx:key="id" class="message-row {{item.role === 'user' ? 'user' : 'assistant'}}">
@@ -35,14 +39,15 @@
   </scroll-view>
 
   <view class="chat-input-bar">
-    <view class="tool-row">
-      <button class="tool-btn" bindtap="chooseCamera">拍</button>
-      <button class="tool-btn" bindtap="chooseAlbum">图</button>
-      <button class="tool-btn {{recording ? 'active' : ''}}" bindtap="onVoiceTap">{{recording ? '停' : '语'}}</button>
-    </view>
-    <view class="send-row">
-      <input class="chat-input" placeholder="{{inputPlaceholder}}" value="{{inputValue}}" confirm-type="send" bindinput="onInput" bindconfirm="onSend" />
-      <button class="send-btn {{!inputValue || sending ? 'disabled' : ''}}" bindtap="onSend">发送</button>
-    </view>
+    <button class="tool-btn image-entry" bindtap="chooseImageSource" aria-label="图片">
+      <t-icon name="logo-instagram" size="42rpx" color="#536171" />
+    </button>
+    <button class="tool-btn voice {{recording ? 'active' : ''}}" bindtap="onVoiceTap" aria-label="语音">
+      <t-icon name="microphone" size="42rpx" color="{{recording ? '#ff6b35' : '#536171'}}" />
+    </button>
+    <input class="chat-input" placeholder="{{inputPlaceholder}}" value="{{inputValue}}" confirm-type="send" bindinput="onInput" bindconfirm="onSend" />
+    <button class="send-btn {{!inputValue || sending ? 'disabled' : ''}}" bindtap="onSend" aria-label="发送">
+      <t-icon name="{{inputValue && !sending ? 'send-filled' : 'send'}}" size="34rpx" color="{{inputValue && !sending ? '#ffffff' : '#6a7282'}}" />
+    </button>
   </view>
 </view>

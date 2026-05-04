@@ -25,7 +25,7 @@ Page({
     messages: [] as Array<{ id: string; role: "user" | "assistant"; text: string }>,
     pendingActions: [] as PendingAction[],
     inputValue: "",
-    inputPlaceholder: "记录饮食、体重，或问问 Agent",
+    inputPlaceholder: "告诉我今天吃了什么...",
     avatar: "female",
     avatarSrc: "/assets/female-fit-agent.png",
     sending: false,
@@ -59,7 +59,7 @@ Page({
     this.setData({
       avatar: getAgentAvatar(),
       avatarSrc: getAgentAvatar() === "male" ? "/assets/male-fit-agent.png" : "/assets/female-fit-agent.png",
-      inputPlaceholder: placeholderMap[mode] || "记录饮食、体重，或问问 Agent"
+      inputPlaceholder: placeholderMap[mode] || "告诉我今天吃了什么..."
     });
     this.ensureConversation();
   },
@@ -150,12 +150,16 @@ Page({
     }
   },
 
-  async chooseCamera() {
-    await this.chooseImage("camera");
-  },
-
-  async chooseAlbum() {
-    await this.chooseImage("album");
+  async chooseImageSource() {
+    try {
+      const res = await wx.showActionSheet({
+        itemList: ["拍照", "从相册选择"]
+      });
+      await this.chooseImage(res.tapIndex === 0 ? "camera" : "album");
+    } catch (error) {
+      if ((error as any)?.errMsg?.includes("cancel")) return;
+      showApiError(error);
+    }
   },
 
   async chooseImage(source: "camera" | "album") {

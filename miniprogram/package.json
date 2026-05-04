@@ -1,0 +1,10 @@
+{
+  "name": "letmefit-miniprogram",
+  "version": "1.0.0",
+  "description": "原生微信小程序 + TypeScript 客户端，UI 按 `figma-share-links.txt` 中的 Figma 页面实现。",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "tdesign-miniprogram": "^1.14.0"
+  }
+}

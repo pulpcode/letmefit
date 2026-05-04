@@ -1,6 +1,7 @@
 {
   "navigationStyle": "custom",
   "usingComponents": {
-    "pending-action-card": "/components/pending-action-card/index"
+    "pending-action-card": "/components/pending-action-card/index",
+    "t-icon": "tdesign-miniprogram/icon/icon"
   }
 }

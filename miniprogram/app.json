@@ -6,6 +6,7 @@
     "pages/home/index",
     "pages/records/index",
     "pages/agent/index",
+    "pages/agent/chat/index",
     "pages/summary/index",
     "pages/profile/index"
   ],

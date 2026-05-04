@@ -1,53 +1,68 @@
-<view class="agent-page">
-  <image class="chat-bg" src="/assets/fit-chat-background.png" mode="aspectFill" />
-  <view class="chat-mask"></view>
-
-  <view class="chat-header">
-    <button class="nav-icon nav-left">☰</button>
-    <view class="agent-mini-avatar">
-      <image src="{{avatarSrc}}" mode="aspectFill" />
-    </view>
-    <view class="chat-title-block">
-      <text class="chat-title">健身助手</text>
-      <text class="chat-subtitle">对话 #1</text>
-    </view>
-    <button class="nav-icon nav-right">⋮</button>
+<view class="sessions-page page">
+  <!-- 顶部标题栏 -->
+  <view class="sessions-header safe-top">
+    <text class="page-title">对话</text>
+    <button class="new-session-btn" bindtap="onNewSession" aria-label="新建会话">
+      <text class="new-icon">✏</text>
+    </button>
   </view>
 
-  <scroll-view class="message-scroll" scroll-y scroll-into-view="{{scrollIntoView}}">
-    <view class="message-list">
-      <view wx:if="{{!messages.length}}" class="message-row assistant welcome-message">
-        <image class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
-        <view class="bubble">
-          <text>你好！我是你的健康健身助手。你可以告诉我今天吃了什么，或者记录体重等身体指标。</text>
+  <!-- 加载态 -->
+  <view wx:if="{{loading}}" class="sessions-loading">
+    <view class="loading-dot"></view>
+    <view class="loading-dot"></view>
+    <view class="loading-dot"></view>
+  </view>
+
+  <!-- 空状态 -->
+  <view wx:elif="{{!conversations.length}}" class="sessions-empty">
+    <image src="/assets/female-fit-agent.png" class="empty-avatar" mode="aspectFit" />
+    <text class="empty-title">还没有对话</text>
+    <text class="empty-desc">点击右上角开始第一次对话吧</text>
+    <button class="btn-primary start-btn" bindtap="onNewSession">开始对话</button>
+  </view>
+
+  <!-- 会话列表 -->
+  <scroll-view wx:else scroll-y class="sessions-list" enhanced>
+    <view
+      wx:for="{{conversations}}"
+      wx:key="id"
+      class="session-item {{item.deleting ? 'deleting' : ''}}"
+      bindtap="onOpenSession"
+      data-id="{{item.id}}"
+      data-title="{{item.title}}"
+      bindlongpress="onLongPressSession"
+    >
+      <!-- 会话图标 -->
+      <view class="session-icon-wrap">
+        <view class="session-icon {{item.iconColor}}">
+          <text class="session-icon-text">💬</text>
         </view>
       </view>
 
-      <view wx:for="{{messages}}" wx:key="id" class="message-row {{item.role === 'user' ? 'user' : 'assistant'}}">
-        <image wx:if="{{item.role === 'assistant'}}" class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
-        <view class="bubble">
-          <text>{{item.text}}</text>
+      <!-- 会话信息 -->
+      <view class="session-info">
+        <view class="session-info-top">
+          <text class="session-title">{{item.title || '新对话'}}</text>
+          <text class="session-time">{{item.timeLabel}}</text>
         </view>
+        <text class="session-preview">{{item.preview || '暂无消息'}}</text>
       </view>
 
-      <view wx:for="{{pendingActions}}" wx:key="pending_action_id" class="pending-wrap">
-        <pending-action-card action="{{item}}" bind:confirm="onConfirmAction" bind:discard="onDiscardAction" bind:edit="onEditAction" />
-      </view>
-
-      <view id="bottom-anchor" class="bottom-anchor"></view>
+      <!-- 箭头 -->
+      <text class="session-chevron">›</text>
     </view>
+
+    <view class="sessions-list-bottom"></view>
   </scroll-view>
 
-  <view class="chat-input-bar">
-    <button class="tool-btn image-entry" bindtap="chooseImageSource" aria-label="图片">
-      <t-icon name="logo-instagram" size="42rpx" color="#536171" />
-    </button>
-    <button class="tool-btn voice {{recording ? 'active' : ''}}" bindtap="onVoiceTap" aria-label="语音">
-      <t-icon name="microphone" size="42rpx" color="{{recording ? '#ff6b35' : '#536171'}}" />
-    </button>
-    <input class="chat-input" placeholder="{{inputPlaceholder}}" value="{{inputValue}}" confirm-type="send" bindinput="onInput" bindconfirm="onSend" />
-    <button class="send-btn {{!inputValue || sending ? 'disabled' : ''}}" bindtap="onSend" aria-label="发送">
-      <t-icon name="{{inputValue && !sending ? 'send-filled' : 'send'}}" size="34rpx" color="{{inputValue && !sending ? '#ffffff' : '#6a7282'}}" />
-    </button>
+  <!-- 长按操作菜单 -->
+  <view wx:if="{{actionSheetVisible}}" class="action-overlay" bindtap="onCloseActionSheet">
+    <view class="action-sheet" catchtap>
+      <view class="action-sheet-title">{{actionSheetTitle}}</view>
+      <button class="action-item action-enter" bindtap="onActionEnter">进入对话</button>
+      <button class="action-item action-delete" bindtap="onActionDelete">删除会话</button>
+      <button class="action-item action-cancel" bindtap="onCloseActionSheet">取消</button>
+    </view>
   </view>
 </view>

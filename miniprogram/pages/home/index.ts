@@ -100,6 +100,7 @@ Page({
     if (mode) {
       wx.setStorageSync("letmefit.agent_prefill_mode", mode);
     }
+    // 切换到对话 Tab（会话列表），列表页 onShow 会检测 prefill_mode 并自动新建会话
     wx.switchTab({ url: "/pages/agent/index" });
   },
 

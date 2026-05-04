@@ -37,3 +37,11 @@ export function listPendingActions(conversationId: string) {
     path: `/conversations/${conversationId}/pending-actions`
   });
 }
+
+export function deleteConversation(conversationId: string) {
+  return request<{}>({
+    path: `/conversations/${conversationId}`,
+    method: "DELETE"
+  });
+}
+

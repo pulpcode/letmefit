@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     dashscope_api_key: str = ""
     bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     bailian_model: str = "qwen-plus"
+    media_upload_dir: str = "./var/uploads"
+    media_public_base_url: str = "http://127.0.0.1:8000"
+    media_max_upload_bytes: int = 10 * 1024 * 1024
 
 
 @lru_cache

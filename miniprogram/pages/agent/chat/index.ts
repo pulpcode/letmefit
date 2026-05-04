@@ -1,6 +1,6 @@
 import { createConversation, listMessages, listPendingActions, sendMessage } from "../../../services/conversations";
 import { confirmPendingAction, discardPendingAction, patchPendingAction } from "../../../services/pendingActions";
-import { createClientLocalUpload } from "../../../services/uploads";
+import { createClientLocalUpload, uploadLocalFile } from "../../../services/uploads";
 import { showApiError } from "../../../utils/request";
 import { getAgentAvatar } from "../../../utils/storage";
 import type { ConversationMessage, MessagePart, PendingAction } from "../../../types/api";
@@ -250,17 +250,21 @@ Page({
   },
 
   async sendAudio(tempFilePath: string, duration: number) {
+    if (this.data.sending) return;
+    this.setData({ sending: true });
     try {
-      const upload = await createClientLocalUpload({
-        client_local_ref: tempFilePath,
+      const upload = await uploadLocalFile({
+        filePath: tempFilePath,
         mime_type: "audio/mpeg",
         source: "microphone"
       });
+      this.setData({ sending: false });
       await this.sendContent(
         [{ type: "audio", file_id: upload.file.id, duration_seconds: Math.round(duration / 1000) }],
         "语音记录"
       );
     } catch (error) {
+      this.setData({ sending: false });
       showApiError(error);
     }
   },

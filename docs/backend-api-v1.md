@@ -930,14 +930,14 @@ out_of_scope
 V1 后端支持多种媒体策略：
 
 - 本地开发：服务端本地文件存储
-- 成本敏感的服务器测试：App 保留图片/音频原始文件在本地，后端只保存 `client_local_ref`、元数据和结构化结果；需要重新识别时由 App 再次临时上传
+- 成本敏感的服务器测试：图片可继续只保留在 App 本地；语音识别需要 App 临时上传到服务端本地存储或提供对象存储临时 URL
 - 公开测试/生产：腾讯云 COS、阿里云 OSS 或其他 S3 兼容对象存储
 
 ### POST /uploads
 
 创建上传记录或返回预签名上传信息。
 
-V1 第一阶段先支持 `client_local` 上传记录：原始图片/音频保留在 App 本地，后端保存 `client_local_ref`、媒体类型和结构化引用。对象存储预签名上传后续再接入。
+V1 第一阶段支持 `client_local` 上传记录：原始图片/音频保留在 App 本地，后端保存 `client_local_ref`、媒体类型和结构化引用。对象存储预签名上传后续再接入。
 
 请求：
 
@@ -984,6 +984,38 @@ V1 第一阶段先支持 `client_local` 上传记录：原始图片/音频保留
   "request_id": "req_..."
 }
 ```
+
+### POST /uploads/local-file
+
+上传测试阶段的本地临时文件。当前用于小程序麦克风录音，让后端生成 DashScope 可访问的 HTTPS 音频 URL。
+
+请求为 `multipart/form-data`：
+
+- `file`：必填，音频文件
+- `source`：默认 `microphone`
+- `retention_policy`：默认 `transient`
+- `mime_type`：可选；小程序上传时应显式传入，例如 `audio/mpeg`
+
+当前仅允许常见音频 MIME，默认最大 10MB。成功后响应与 `POST /uploads` 相同，但文件记录为：
+
+```json
+{
+  "storage_provider": "local_server",
+  "client_local_ref": null,
+  "object_key": "https://www.letmefit.cloud/media/user_.../file_....mp3",
+  "status": "ready"
+}
+```
+
+服务端需配置：
+
+```env
+MEDIA_UPLOAD_DIR=./var/uploads
+MEDIA_PUBLIC_BASE_URL=https://www.letmefit.cloud
+MEDIA_MAX_UPLOAD_BYTES=10485760
+```
+
+`MEDIA_PUBLIC_BASE_URL` 必须是 DashScope 可以访问的公网 HTTP/HTTPS 地址；本机 `127.0.0.1` 只能用于测试上传，不能用于真实 ASR。
 
 ### GET /uploads/{file_id}
 

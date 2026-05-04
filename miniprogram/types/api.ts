@@ -164,10 +164,13 @@ export type UploadFile = {
   id: string;
   storage_provider: string;
   client_local_ref?: string | null;
+  bucket?: string | null;
+  object_key?: string | null;
   mime_type?: string | null;
   size_bytes?: number | null;
   source?: string | null;
   retention_policy?: string | null;
   status?: string | null;
   created_at?: string;
+  deleted_at?: string | null;
 };

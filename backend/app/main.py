@@ -21,6 +21,11 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_prefix)
+    app.mount(
+        "/media",
+        StaticFiles(directory=settings.media_upload_dir, check_dir=False),
+        name="media",
+    )
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.exists():
         app.mount("/test", StaticFiles(directory=static_dir, html=True), name="test")

@@ -101,6 +101,17 @@ sudo -u letmefit nano .env.production
 - `ALIYUN_SMS_SIGN_NAME`
 - `ALIYUN_SMS_TEMPLATE_CODE`
 - `BAILIAN_API_KEY`
+- `MEDIA_PUBLIC_BASE_URL`
+
+语音识别测试阶段建议设置：
+
+```env
+ASR_PROVIDER=dashscope_recording
+DASHSCOPE_API_KEY=replace-with-dashscope-api-key
+MEDIA_UPLOAD_DIR=./var/uploads
+MEDIA_PUBLIC_BASE_URL=https://www.letmefit.cloud
+MEDIA_MAX_UPLOAD_BYTES=10485760
+```
 
 ## 6. MySQL And Redis
 

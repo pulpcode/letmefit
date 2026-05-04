@@ -287,7 +287,7 @@ InputNormalizer -> IntentRouter -> ExtractionService -> RuleEngine -> ResponseCo
 - 图片 part 进入图片理解 adapter；默认 `mock` 只返回未处理状态和警告，不生成假识别内容。
 - 真实 ASR 或图片理解模型接入后，应通过同一 adapter 输出转写文本或图片描述，再与原始消息、上下文一起交给 extraction provider。
 
-ASR 第一版真实 provider 使用百炼/DashScope Paraformer 录音文件识别 REST API，配置为 `ASR_PROVIDER=dashscope_recording`。由于该接口要求音频文件 URL 可被服务端公网访问，成本敏感测试阶段的 `client_local` 音频不会被后端直接识别；需要识别时，客户端应上传临时文件或提供对象存储临时 URL。
+ASR 第一版真实 provider 使用百炼/DashScope Paraformer 录音文件识别 REST API，配置为 `ASR_PROVIDER=dashscope_recording`。由于该接口要求音频文件 URL 可被服务端公网访问，成本敏感测试阶段的 `client_local` 音频不会被后端直接识别；小程序语音入口应通过 `POST /uploads/local-file` 临时上传到服务端本地存储，或提供对象存储临时 URL。
 
 上下文由后端 `ContextBuilder` 动态组装，不等于把数据库中的全量消息都塞给模型。每次调用模型时只取当前消息、当前待确认动作、最近若干条消息、滚动摘要、用户档案、最近正式记录、相关用户记忆和安全规则。原始消息用于 UI 展示和审计，较早消息压缩到 `conversation_summaries`，正式事实仍以档案和记录表为准。
 

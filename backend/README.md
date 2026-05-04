@@ -69,6 +69,16 @@ DASHSCOPE_ASR_LANGUAGE_HINTS=zh,en
 
 DashScope recording-file ASR requires a public HTTP/HTTPS audio URL or supported OSS URL. `client_local` audio remains unprocessed until the client uploads a server-accessible temporary file.
 
+For the first WeChat Mini Program voice flow, upload microphone recordings to the backend as temporary local-server files:
+
+```env
+MEDIA_UPLOAD_DIR=./var/uploads
+MEDIA_PUBLIC_BASE_URL=https://www.letmefit.cloud
+MEDIA_MAX_UPLOAD_BYTES=10485760
+```
+
+The client sends `POST /v1/uploads/local-file` as multipart form data. The backend stores the file under `MEDIA_UPLOAD_DIR`, exposes it from `/media/...`, saves an `upload_files` row with `storage_provider=local_server`, and passes the public media URL to DashScope during message normalization. In local development, real ASR needs a public tunnel URL for `MEDIA_PUBLIC_BASE_URL`; `http://127.0.0.1:8000` is only useful for exercising the upload path.
+
 First-stage OSS URL smoke test:
 
 ```bash

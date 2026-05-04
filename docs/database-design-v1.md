@@ -129,12 +129,12 @@ V1 数据库支撑以下闭环：
 | `storage_provider` | `VARCHAR(32)` | `client_local` / `local_server` / `cos` / `oss` / `s3` |
 | `client_local_ref` | `VARCHAR(256)` NULL | App 本地资源引用 |
 | `bucket` | `VARCHAR(128)` NULL | 对象存储 bucket |
-| `object_key` | `VARCHAR(512)` NULL | 服务端或对象存储 key |
+| `object_key` | `VARCHAR(512)` NULL | 服务端公网媒体 URL 或对象存储 key |
 | `mime_type` | `VARCHAR(128)` | 文件类型 |
 | `size_bytes` | `BIGINT` NULL | 文件大小 |
 | `source` | `VARCHAR(32)` | `camera` / `album` / `microphone` / `upload` |
 | `retention_policy` | `VARCHAR(32)` | `transient` / `retained` |
-| `status` | `VARCHAR(32)` | `pending` / `uploaded` / `local_only` / `failed` / `deleted` |
+| `status` | `VARCHAR(32)` | `pending` / `ready` / `uploaded` / `local_only` / `failed` / `deleted` |
 | `created_at` | `DATETIME(6)` | 创建时间 |
 | `deleted_at` | `DATETIME(6)` NULL | 删除时间 |
 
@@ -146,6 +146,7 @@ V1 数据库支撑以下闭环：
 注意：
 
 - `client_local` 文件不能被后端长期重放识别；如需重新识别，客户端必须再次临时上传或发送原始文件。
+- `local_server` 语音文件用于测试阶段临时识别，`object_key` 应是 ASR 服务可访问的公网 HTTP/HTTPS URL。
 - 正式记录不能依赖本地图片存在，必须保存结构化字段。
 
 ### 3.2 `conversations`

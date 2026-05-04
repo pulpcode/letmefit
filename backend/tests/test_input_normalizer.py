@@ -24,6 +24,13 @@ class FakeSpeechProvider:
         )
 
 
+class FailingSpeechProvider:
+    provider_name = "failing_asr"
+
+    def transcribe(self, media: MediaInput) -> SpeechToTextResult:
+        raise AssertionError("prefetched ASR should skip provider transcription")
+
+
 class FakeImageProvider:
     provider_name = "fake_vision"
 
@@ -81,6 +88,26 @@ def test_input_normalizer_adds_asr_transcript_text() -> None:
     media_context = result.context["media"][0]
     assert media_context["status"] == "transcribed"
     assert media_context["server_accessible"] is False
+
+
+def test_input_normalizer_reuses_prefetched_asr_without_duplicate_transcript() -> None:
+    normalizer = _normalizer(speech_provider=FailingSpeechProvider())
+
+    result = normalizer.normalize(
+        [
+            MessageContentItem(type="audio", file_id="file_audio", duration_seconds=3),
+            MessageContentItem(type="text", text="语音转写: 你叫什么名字", source="asr"),
+        ],
+        {"file_audio": _file("file_audio", "audio/mpeg", storage_provider="local_server")},
+    )
+
+    asr_texts = [item for item in result.content if item.type == "text" and item.source == "asr"]
+    assert len(asr_texts) == 1
+    assert asr_texts[0].text == "语音转写: 你叫什么名字"
+    media_context = result.context["media"][0]
+    assert media_context["status"] == "transcribed"
+    assert media_context["transcript"] == "你叫什么名字"
+    assert media_context["provider"] == "client_prefetched_asr"
 
 
 def test_input_normalizer_adds_image_description_text() -> None:

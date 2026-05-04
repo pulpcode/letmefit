@@ -6,6 +6,11 @@ from fastapi import UploadFile as FastAPIUploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai.input_normalizer import (
+    MediaInput,
+    SpeechToTextProvider,
+    get_speech_to_text_provider,
+)
 from app.auth.security import new_id, utc_now
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
@@ -28,9 +33,15 @@ AUDIO_MIME_EXTENSIONS = {
 
 
 class UploadService:
-    def __init__(self, db: Session, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        settings: Settings | None = None,
+        speech_provider: SpeechToTextProvider | None = None,
+    ) -> None:
         self.db = db
         self.settings = settings or get_settings()
+        self.speech_provider = speech_provider
 
     def create_upload(self, user_id: str, payload: UploadCreateRequest) -> dict:
         file = UploadFileModel(
@@ -120,6 +131,39 @@ class UploadService:
 
     def get_upload(self, user_id: str, file_id: str) -> dict:
         return {"file": self._response(self._get_owned_file(user_id, file_id))}
+
+    def transcribe_upload(self, user_id: str, file_id: str) -> dict:
+        file = self._get_owned_file(user_id, file_id)
+        mime_type = self._normalize_mime_type(file.mime_type)
+        if not mime_type.startswith("audio/"):
+            raise AppError(
+                "VALIDATION_ERROR",
+                "只支持转写音频文件",
+                status_code=422,
+                details={"mime_type": file.mime_type},
+            )
+
+        media = MediaInput(
+            file_id=file.id,
+            type="audio",
+            mime_type=mime_type,
+            storage_provider=file.storage_provider,
+            client_local_ref=file.client_local_ref,
+            bucket=file.bucket,
+            object_key=file.object_key,
+            source=file.source or "microphone",
+        )
+        speech_provider = self.speech_provider or get_speech_to_text_provider(self.settings)
+        result = speech_provider.transcribe(media)
+        return {
+            "file_id": file.id,
+            "status": "transcribed" if result.transcript else "unprocessed",
+            "transcript": result.transcript,
+            "language": result.language,
+            "confidence": result.confidence,
+            "provider": result.provider,
+            "warnings": result.warnings,
+        }
 
     def delete_upload(self, user_id: str, file_id: str) -> dict:
         file = self._get_owned_file(user_id, file_id)

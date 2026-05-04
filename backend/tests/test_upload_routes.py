@@ -5,10 +5,12 @@ from fastapi import UploadFile as FastAPIUploadFile
 from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
 
+from app.ai.input_normalizer import MediaInput, SpeechToTextResult
 from app.auth.dependencies import get_current_user
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.main import create_app
+from app.models import UploadFile as UploadFileModel
 from app.models import User
 from app.schemas.upload import UploadCreateRequest
 from app.services.uploads import UploadService, get_upload_service
@@ -71,6 +73,18 @@ class FakeUploadService:
                 "created_at": "2026-05-01T12:00:00",
                 "deleted_at": None,
             }
+        }
+
+    def transcribe_upload(self, user_id: str, file_id: str) -> dict:
+        self.calls.append(("transcribe", user_id, file_id))
+        return {
+            "file_id": file_id,
+            "status": "transcribed",
+            "transcript": "你叫什么名字",
+            "language": "zh-CN",
+            "confidence": None,
+            "provider": "fake_asr",
+            "warnings": [],
         }
 
     def delete_upload(self, user_id: str, file_id: str) -> dict:
@@ -206,6 +220,20 @@ def test_get_and_delete_upload_use_current_user() -> None:
     ]
 
 
+def test_transcribe_upload_uses_current_user() -> None:
+    service = FakeUploadService()
+    client = TestClient(_authorized_app(service))
+
+    response = client.post("/v1/uploads/file_audio/transcription")
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["file_id"] == "file_audio"
+    assert body["status"] == "transcribed"
+    assert body["transcript"] == "你叫什么名字"
+    assert service.calls == [("transcribe", "user_test", "file_audio")]
+
+
 def test_client_local_upload_requires_local_ref() -> None:
     client = TestClient(_authorized_app())
 
@@ -235,6 +263,69 @@ class FakeDb:
 
     def refresh(self, value) -> None:
         pass
+
+
+class FakeScalarDb:
+    def __init__(self, value) -> None:
+        self.value = value
+
+    def scalar(self, statement):
+        return self.value
+
+
+class FakeSpeechProvider:
+    provider_name = "fake_asr"
+
+    def transcribe(self, media: MediaInput) -> SpeechToTextResult:
+        return SpeechToTextResult(
+            transcript="你叫什么名字",
+            language="zh-CN",
+            provider=self.provider_name,
+        )
+
+
+def _upload_file_model(mime_type: str = "audio/mpeg") -> UploadFileModel:
+    return UploadFileModel(
+        id="file_audio",
+        user_id="user_test",
+        storage_provider="local_server",
+        client_local_ref=None,
+        bucket=None,
+        object_key="https://www.letmefit.cloud/media/user_test/file_audio.mp3",
+        mime_type=mime_type,
+        size_bytes=1234,
+        source="microphone",
+        retention_policy="transient",
+        status="ready",
+    )
+
+
+def test_upload_service_transcribes_owned_audio_upload() -> None:
+    service = UploadService(
+        db=FakeScalarDb(_upload_file_model()),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+        speech_provider=FakeSpeechProvider(),
+    )
+
+    result = service.transcribe_upload("user_test", "file_audio")
+
+    assert result["file_id"] == "file_audio"
+    assert result["status"] == "transcribed"
+    assert result["transcript"] == "你叫什么名字"
+    assert result["provider"] == "fake_asr"
+
+
+def test_upload_service_transcribe_rejects_non_audio_upload() -> None:
+    service = UploadService(
+        db=FakeScalarDb(_upload_file_model("image/jpeg")),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+        speech_provider=FakeSpeechProvider(),
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        service.transcribe_upload("user_test", "file_image")
+
+    assert exc_info.value.code == "VALIDATION_ERROR"
 
 
 @pytest.mark.asyncio

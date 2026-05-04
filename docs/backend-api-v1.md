@@ -1017,6 +1017,29 @@ MEDIA_MAX_UPLOAD_BYTES=10485760
 
 `MEDIA_PUBLIC_BASE_URL` 必须是 DashScope 可以访问的公网 HTTP/HTTPS 地址；本机 `127.0.0.1` 只能用于测试上传，不能用于真实 ASR。
 
+### POST /uploads/{file_id}/transcription
+
+对当前用户自己的音频上传文件执行语音转写。该接口不创建会话消息，用于客户端在发送语音消息前先拿到 ASR 文本并提前显示。
+
+响应：
+
+```json
+{
+  "data": {
+    "file_id": "file_...",
+    "status": "transcribed",
+    "transcript": "你叫什么名字",
+    "language": "zh-CN",
+    "confidence": null,
+    "provider": "dashscope_recording",
+    "warnings": []
+  },
+  "request_id": "req_..."
+}
+```
+
+如果 `status` 为 `unprocessed` 或 `transcript` 为空，客户端应提示用户重录，不应继续把空语音交给模型。
+
 ### GET /uploads/{file_id}
 
 获取当前用户自己的上传记录。

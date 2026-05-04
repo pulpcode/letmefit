@@ -54,6 +54,17 @@ def get_upload(
     return success_response(data, request)
 
 
+@router.post("/{file_id}/transcription")
+def transcribe_upload(
+    file_id: str,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[UploadService, Depends(get_upload_service)],
+) -> dict:
+    data = service.transcribe_upload(current_user.id, file_id)
+    return success_response(data, request)
+
+
 @router.delete("/{file_id}")
 def delete_upload(
     file_id: str,

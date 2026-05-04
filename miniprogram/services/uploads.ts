@@ -1,5 +1,5 @@
 import { request, uploadFile } from "../utils/request";
-import type { UploadFile } from "../types/api";
+import type { UploadFile, UploadTranscriptionResponse } from "../types/api";
 
 type UploadRecordInput = {
   client_local_ref: string;
@@ -39,5 +39,12 @@ export function uploadLocalFile(input: LocalFileUploadInput) {
       source: input.source,
       retention_policy: "transient"
     }
+  });
+}
+
+export function transcribeUploadFile(fileId: string) {
+  return request<UploadTranscriptionResponse>({
+    path: `/uploads/${fileId}/transcription`,
+    method: "POST"
   });
 }

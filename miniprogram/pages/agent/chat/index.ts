@@ -1,6 +1,6 @@
 import { createConversation, listMessages, listPendingActions, sendMessage } from "../../../services/conversations";
 import { confirmPendingAction, discardPendingAction, patchPendingAction } from "../../../services/pendingActions";
-import { createClientLocalUpload, uploadLocalFile } from "../../../services/uploads";
+import { createClientLocalUpload, transcribeUploadFile, uploadLocalFile } from "../../../services/uploads";
 import { showApiError } from "../../../utils/request";
 import { getAgentAvatar } from "../../../utils/storage";
 import type { ConversationMessage, MessagePart, PendingAction } from "../../../types/api";
@@ -353,6 +353,21 @@ Page({
     if (!valid) {
       return;
     }
+    const conversationId = await this.ensureConversation();
+    if (!conversationId) return;
+
+    const localUserMessage: ChatMessage = {
+      id: `local_user_voice_${Date.now()}`,
+      role: "user",
+      text: "正在识别..."
+    };
+    this.setData({
+      sending: true,
+      messages: [...this.data.messages, localUserMessage]
+    });
+    this.scrollToBottom();
+
+    let transcriptShown = false;
     try {
       // 必须用 uploadLocalFile 将音频文件上传到服务端，
       // 后端 ASR（paraformer）需要一个公网可访问的 HTTP URL，
@@ -363,15 +378,59 @@ Page({
         mime_type: mimeType,
         source: "microphone"
       });
-      await this.sendContent(
-        [{ type: "audio", file_id: upload.file.id, duration_seconds: Math.round(duration / 1000) }],
-        "🎤"
-      );
-      // 发送完成后刷新，用服务端实际转写文字更新用户气泡
-      await this.refreshConversation();
+      const transcription = await transcribeUploadFile(upload.file.id);
+      const transcript = stripAsrPrefix(transcription.transcript || "").trim();
+      if (!transcript) {
+        this._removeMessage(localUserMessage.id);
+        wx.showToast({ title: "语音识别失败", icon: "none" });
+        return;
+      }
+
+      this._updateMessageText(localUserMessage.id, transcript);
+      transcriptShown = true;
+      const data = await sendMessage(conversationId, [
+        { type: "audio", file_id: upload.file.id, duration_seconds: Math.round(duration / 1000) },
+        { type: "text", text: `语音转写: ${transcript}`, source: "asr" }
+      ]);
+      const nextMessages = [...this.data.messages];
+      if (data.assistant_text) {
+        nextMessages.push({
+          id: data.assistant_message_id || `local_assistant_${Date.now()}`,
+          role: "assistant",
+          text: data.assistant_text
+        });
+      }
+      this.setData({
+        messages: nextMessages,
+        pendingActions: data.pending_actions || this.data.pendingActions
+      });
+      if (data.committed_records?.length) {
+        wx.showToast({ title: "已自动保存", icon: "success" });
+      }
+      this.scrollToBottom();
     } catch (error) {
+      if (!transcriptShown) {
+        this._removeMessage(localUserMessage.id);
+      }
       showApiError(error);
+    } finally {
+      this.setData({ sending: false });
     }
+  },
+
+  _updateMessageText(messageId: string, text: string) {
+    this.setData({
+      messages: this.data.messages.map((message) =>
+        message.id === messageId ? { ...message, text } : message
+      )
+    });
+    this.scrollToBottom();
+  },
+
+  _removeMessage(messageId: string) {
+    this.setData({
+      messages: this.data.messages.filter((message) => message.id !== messageId)
+    });
   },
 
   async _validateAudioFile(filePath: string, duration: number): Promise<boolean> {

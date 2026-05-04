@@ -123,7 +123,7 @@ export type Conversation = {
 };
 
 export type MessagePart =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; source?: string }
   | { type: "image"; file_id: string; source?: "camera" | "album" | "upload" }
   | { type: "audio"; file_id: string; duration_seconds?: number };
 
@@ -173,4 +173,14 @@ export type UploadFile = {
   status?: string | null;
   created_at?: string;
   deleted_at?: string | null;
+};
+
+export type UploadTranscriptionResponse = {
+  file_id: string;
+  status: "transcribed" | "unprocessed";
+  transcript?: string | null;
+  language?: string | null;
+  confidence?: number | null;
+  provider?: string | null;
+  warnings?: Array<Record<string, unknown>>;
 };

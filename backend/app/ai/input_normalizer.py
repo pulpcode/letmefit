@@ -309,6 +309,7 @@ class InputNormalizer:
     ) -> NormalizedInput:
         normalized_content = list(content)
         normalized_media = []
+        prefetched_asr_transcript = self._prefetched_asr_transcript(content)
 
         for item in content:
             if item.type == "text":
@@ -321,9 +322,16 @@ class InputNormalizer:
 
             media = self._media_input(item, file)
             if item.type == "audio":
-                result = self.speech_provider.transcribe(media)
+                result = (
+                    SpeechToTextResult(
+                        transcript=prefetched_asr_transcript,
+                        provider="client_prefetched_asr",
+                    )
+                    if prefetched_asr_transcript
+                    else self.speech_provider.transcribe(media)
+                )
                 normalized_media.append(self._audio_context(media, result))
-                if result.transcript:
+                if result.transcript and not prefetched_asr_transcript:
                     normalized_content.append(
                         MessageContentItem(
                             type="text",
@@ -351,6 +359,19 @@ class InputNormalizer:
                 "media": normalized_media,
             },
         )
+
+    def _prefetched_asr_transcript(self, content: list[MessageContentItem]) -> str | None:
+        for item in content:
+            if item.type != "text" or item.source != "asr" or not item.text:
+                continue
+            transcript = item.text.strip()
+            for prefix in ("语音转写:", "语音转写："):
+                if transcript.startswith(prefix):
+                    transcript = transcript[len(prefix) :].strip()
+                    break
+            if transcript:
+                return transcript
+        return None
 
     def _media_input(self, item: MessageContentItem, file: UploadFile) -> MediaInput:
         return MediaInput(

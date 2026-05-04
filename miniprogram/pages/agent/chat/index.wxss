@@ -36,7 +36,6 @@
   border-bottom: 2rpx solid #e5e7eb;
 }
 
-/* 返回按钮 */
 .back-btn {
   width: 72rpx;
   height: 72rpx;
@@ -228,12 +227,12 @@
   justify-content: center;
   background: #f5f7fa;
   border: 2rpx solid #edf1f5;
-  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
-.tool-btn.active {
-  background: rgba(255, 107, 53, 0.12);
-  border-color: rgba(255, 107, 53, 0.28);
+.voice-btn-active {
+  background: linear-gradient(135deg, #06d6a0 0%, #00b4d8 100%) !important;
+  border-color: transparent !important;
+  box-shadow: 0 4rpx 16rpx rgba(6, 214, 160, 0.4);
 }
 
 .chat-input {
@@ -262,4 +261,154 @@
 .send-btn.disabled {
   opacity: 0.5;
   background: linear-gradient(90deg, #d1d5dc 0%, #99a1af 100%);
+}
+
+/* ========== 录音浮层小卡片（紧贴输入栏上方） ========== */
+.voice-card {
+  position: fixed;
+  left: 24rpx;
+  right: 24rpx;
+  bottom: calc(134rpx + env(safe-area-inset-bottom) + 16rpx);
+  z-index: 5;
+  background: rgba(16, 24, 40, 0.88);
+  border-radius: 28rpx;
+  padding: 28rpx 32rpx;
+  display: flex;
+  align-items: center;
+  gap: 28rpx;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: cardSlideUp 0.2s ease;
+  transition: background 0.2s ease;
+}
+
+.voice-card-cancel {
+  background: rgba(251, 44, 54, 0.88) !important;
+}
+
+@keyframes cardSlideUp {
+  from { transform: translateY(20rpx); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+/* 左侧波纹区 */
+.voice-card-left {
+  flex-shrink: 0;
+}
+
+.voice-rings-sm {
+  position: relative;
+  width: 96rpx;
+  height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-ring-sm {
+  position: absolute;
+  border-radius: 50%;
+  border: 2rpx solid rgba(6, 214, 160, 0.45);
+  animation: rippleSm 1.8s ease-out infinite;
+}
+
+.ring-sm1 { width: 96rpx; height: 96rpx; animation-delay: 0s; }
+.ring-sm2 { width: 66rpx; height: 66rpx; animation-delay: 0.35s; border-color: rgba(0, 180, 216, 0.5); }
+
+@keyframes rippleSm {
+  0%   { transform: scale(0.8); opacity: 0.9; }
+  70%  { transform: scale(1.05); opacity: 0.3; }
+  100% { transform: scale(1.12); opacity: 0; }
+}
+
+.voice-core-sm {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #06d6a0 0%, #00b4d8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulseSm 1s ease-in-out infinite alternate;
+  box-shadow: 0 4rpx 16rpx rgba(6, 214, 160, 0.5);
+}
+
+@keyframes pulseSm {
+  from { transform: scale(1); }
+  to   { transform: scale(1.1); }
+}
+
+/* 中间内容 */
+.voice-card-mid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+/* 音波条 */
+.voice-waveform {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  height: 36rpx;
+}
+
+.wave-bar {
+  width: 6rpx;
+  border-radius: 9999rpx;
+  background: rgba(6, 214, 160, 0.85);
+  animation: waveDance 0.8s ease-in-out infinite alternate;
+}
+
+.bar-0 { height: 16rpx; animation-delay: 0.0s; }
+.bar-1 { height: 28rpx; animation-delay: 0.1s; }
+.bar-2 { height: 36rpx; animation-delay: 0.15s; }
+.bar-3 { height: 22rpx; animation-delay: 0.05s; }
+.bar-4 { height: 32rpx; animation-delay: 0.2s; }
+.bar-5 { height: 18rpx; animation-delay: 0.12s; }
+.bar-6 { height: 26rpx; animation-delay: 0.08s; }
+.bar-7 { height: 14rpx; animation-delay: 0.18s; }
+
+@keyframes waveDance {
+  from { transform: scaleY(0.5); opacity: 0.6; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+
+/* 进度条行 */
+.voice-card-timer-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.voice-timer-bar-sm {
+  flex: 1;
+  height: 6rpx;
+  border-radius: 9999rpx;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+
+.voice-timer-fill-sm {
+  height: 100%;
+  border-radius: 9999rpx;
+  background: linear-gradient(90deg, #06d6a0 0%, #00b4d8 100%);
+  transition: width 0.2s linear;
+}
+
+.voice-timer-text-sm {
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.7);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  min-width: 40rpx;
+  text-align: right;
+}
+
+.voice-card-tip {
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 1rpx;
 }

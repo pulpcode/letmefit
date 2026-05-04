@@ -7,7 +7,7 @@
 默认 API 地址：
 
 ```text
-http://127.0.0.1:8000/v1
+见 `config/env.ts` 中的 `DEFAULT_API_BASE_URL`
 ```
 
 如需连接局域网或测试环境后端，可在开发者工具 Storage 中设置：
@@ -15,6 +15,8 @@ http://127.0.0.1:8000/v1
 ```text
 LETMEFIT_API_BASE_URL = http://你的后端地址/v1
 ```
+
+如果线上语音或媒体接口已经切换地址但小程序仍访问旧服务，先检查并清除开发者工具 Storage 里的 `LETMEFIT_API_BASE_URL`，因为它会覆盖代码中的默认地址。
 
 ## 主要目录
 

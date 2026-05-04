@@ -52,17 +52,58 @@
     </view>
   </scroll-view>
 
-  <!-- 输入栏 -->
+  <!-- 输入栏：图片 | 输入框 | 麦克风 | 发送 -->
   <view class="chat-input-bar">
     <button class="tool-btn image-entry" bindtap="chooseImageSource" aria-label="图片">
       <t-icon name="logo-instagram" size="42rpx" color="#536171" />
     </button>
-    <button class="tool-btn voice {{recording ? 'active' : ''}}" bindtap="onVoiceTap" aria-label="语音">
-      <t-icon name="microphone" size="42rpx" color="{{recording ? '#ff6b35' : '#536171'}}" />
+    <input
+      class="chat-input"
+      placeholder="{{inputPlaceholder}}"
+      value="{{inputValue}}"
+      confirm-type="send"
+      bindinput="onInput"
+      bindconfirm="onSend"
+    />
+    <button
+      class="tool-btn voice-btn {{recording ? 'voice-btn-active' : ''}}"
+      bindtouchstart="onVoiceTouchStart"
+      bindtouchend="onVoiceTouchEnd"
+      bindtouchcancel="onVoiceTouchCancel"
+      aria-label="语音"
+    >
+      <t-icon name="microphone" size="42rpx" color="{{recording ? '#ffffff' : '#536171'}}" />
     </button>
-    <input class="chat-input" placeholder="{{inputPlaceholder}}" value="{{inputValue}}" confirm-type="send" bindinput="onInput" bindconfirm="onSend" />
     <button class="send-btn {{!inputValue || sending ? 'disabled' : ''}}" bindtap="onSend" aria-label="发送">
       <t-icon name="{{inputValue && !sending ? 'send-filled' : 'send'}}" size="34rpx" color="{{inputValue && !sending ? '#ffffff' : '#6a7282'}}" />
     </button>
+  </view>
+
+  <!-- 录音浮层：紧贴输入栏上方的小卡片 -->
+  <view wx:if="{{recording}}" class="voice-card {{voiceCancelling ? 'voice-card-cancel' : ''}}">
+    <!-- 左侧：波纹 + 麦克风 -->
+    <view class="voice-card-left">
+      <view class="voice-rings-sm">
+        <view class="voice-ring-sm ring-sm1"></view>
+        <view class="voice-ring-sm ring-sm2"></view>
+        <view class="voice-core-sm">
+          <t-icon name="microphone" size="36rpx" color="#ffffff" />
+        </view>
+      </view>
+    </view>
+
+    <!-- 中间：进度条 + 提示 -->
+    <view class="voice-card-mid">
+      <view class="voice-waveform">
+        <view wx:for="{{8}}" wx:key="*this" class="wave-bar bar-{{index}}"></view>
+      </view>
+      <view class="voice-card-timer-row">
+        <view class="voice-timer-bar-sm">
+          <view class="voice-timer-fill-sm" style="width: {{voiceProgress}}%"></view>
+        </view>
+        <text class="voice-timer-text-sm">{{voiceRemain}}s</text>
+      </view>
+      <text class="voice-card-tip">{{voiceCancelling ? '松手取消' : '松手发送 · 上滑取消'}}</text>
+    </view>
   </view>
 </view>

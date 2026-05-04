@@ -68,10 +68,13 @@ class ExtractionService:
 
         pending_actions = []
         committed_records = []
+        input_text = self._joined_text(content)
         for action_spec in provider_result.action_specs:
             draft_payload = normalize_pending_action_draft(
                 action_spec.action_type,
                 action_spec.draft_payload,
+                input_text=input_text,
+                now=utc_now(),
             )
             confidence = self._action_confidence(action_spec, provider_result, draft_payload)
             decision = decide_auto_commit(
@@ -81,7 +84,7 @@ class ExtractionService:
                 warnings=action_spec.warnings,
                 provider_warnings=provider_result.warnings,
                 input_types=self._input_types(content),
-                input_text=self._joined_text(content),
+                input_text=input_text,
                 input_normalization=(context or {}).get("input_normalization"),
             )
             if decision.auto_commit:

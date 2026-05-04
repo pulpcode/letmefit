@@ -36,7 +36,7 @@ Component({
       if (action.type === "create_meal_record") {
         const items = (payload.items || []).map((item: any) => ({
           ...item,
-          caloriesText: numberText(item.calories),
+          caloriesText: numberText(item.calories, " kcal"),
           proteinText: numberText(item.protein_g, "g"),
           carbsText: numberText(item.carbs_g, "g"),
           fatText: numberText(item.fat_g, "g"),
@@ -53,7 +53,7 @@ Component({
             mealType: mealTypeLabels[payload.meal_type || "unknown"] || "餐食",
             items,
             totals: [
-              { label: "总热量", value: numberText(totalCalories) },
+              { label: "总热量", value: numberText(totalCalories, " kcal") },
               { label: "蛋白质", value: numberText(Number(totalProtein.toFixed ? totalProtein.toFixed(1) : totalProtein), "g") },
               { label: "碳水", value: numberText(Number(totalCarbs.toFixed ? totalCarbs.toFixed(1) : totalCarbs), "g") },
               { label: "脂肪", value: numberText(Number(totalFat.toFixed ? totalFat.toFixed(1) : totalFat), "g") }

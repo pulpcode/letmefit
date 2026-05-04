@@ -273,6 +273,37 @@ async def test_upload_service_saves_local_audio_file(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_upload_service_saves_webm_audio_file(tmp_path) -> None:
+    db = FakeDb()
+    service = UploadService(
+        db=db,
+        settings=Settings(
+            jwt_secret_key="test-secret-key-with-enough-length",
+            media_upload_dir=str(tmp_path),
+            media_public_base_url="https://www.letmefit.cloud",
+        ),
+    )
+    upload_file = FastAPIUploadFile(
+        file=io.BytesIO(b"\x1a\x45\xdf\xa3webm-audio-bytes"),
+        filename="voice.webm",
+        headers=Headers({"content-type": "audio/webm"}),
+    )
+
+    result = await service.create_local_file_upload(
+        "user_test",
+        upload_file=upload_file,
+        source="microphone",
+        retention_policy="transient",
+    )
+
+    saved_files = list(tmp_path.rglob("*.webm"))
+    assert len(saved_files) == 1
+    assert saved_files[0].read_bytes() == b"\x1a\x45\xdf\xa3webm-audio-bytes"
+    assert result["file"]["object_key"].endswith(".webm")
+    assert result["file"]["mime_type"] == "audio/webm"
+
+
+@pytest.mark.asyncio
 async def test_upload_service_rejects_unsupported_local_file(tmp_path) -> None:
     service = UploadService(
         db=FakeDb(),

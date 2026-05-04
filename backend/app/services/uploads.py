@@ -19,6 +19,8 @@ AUDIO_MIME_EXTENSIONS = {
     "audio/mp3": "mp3",
     "audio/mp4": "m4a",
     "audio/mpeg": "mp3",
+    "audio/opus": "opus",
+    "audio/webm": "webm",
     "audio/wav": "wav",
     "audio/x-m4a": "m4a",
     "audio/x-wav": "wav",

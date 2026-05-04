@@ -994,9 +994,9 @@ V1 第一阶段支持 `client_local` 上传记录：原始图片/音频保留在
 - `file`：必填，音频文件
 - `source`：默认 `microphone`
 - `retention_policy`：默认 `transient`
-- `mime_type`：可选；小程序上传时应显式传入，例如 `audio/mpeg`
+- `mime_type`：可选；小程序上传时应显式传入，例如 `audio/mpeg`、`audio/mp4` 或 `audio/webm`
 
-当前仅允许常见音频 MIME，默认最大 10MB。成功后响应与 `POST /uploads` 相同，但文件记录为：
+当前仅允许常见音频 MIME，包括 `audio/mpeg`、`audio/mp4`、`audio/webm`、`audio/opus`、`audio/aac` 和 `audio/wav`，默认最大 10MB。成功后响应与 `POST /uploads` 相同，但文件记录为：
 
 ```json
 {

@@ -15,6 +15,7 @@ CONTEXT_CONTRACT = {
     "rules": [
         "当前 message_content 是本轮用户输入，优先于历史消息。",
         "profile 和 recent_records 是后端确认后的正式事实。",
+        "当用户询问今天或近期已记录内容时，必须优先读取 recent_records。",
         "只有 active_pending_actions 表示当前仍待用户处理的草稿。",
         "recent_messages 和 conversation_summary 只是历史线索，不能覆盖正式记录。",
         "历史 assistant 文案不能作为 pending action 是否仍存在的依据。",

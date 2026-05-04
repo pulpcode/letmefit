@@ -133,3 +133,45 @@ def test_extraction_service_keeps_fuzzy_meal_as_pending() -> None:
     assert result["requires_review"] is True
     assert result["committed_records"] == []
     assert result["pending_actions"][0]["type"] == "create_meal_record"
+
+
+def test_extraction_service_normalizes_backfilled_meal_time(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.ai.extraction_service.utc_now",
+        lambda: datetime.fromisoformat("2026-05-01T07:20:00"),
+    )
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我先整理成餐食草稿，请确认。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.70"),
+            action_specs=[
+                ExtractionActionSpec(
+                    action_type="create_meal_record",
+                    confidence=Decimal("0.70"),
+                    draft_payload={
+                        "recorded_at": "2026-05-01T23:00:00+08:00",
+                        "recorded_tz": "Asia/Shanghai",
+                        "source_type": "voice",
+                        "meal_type": "breakfast",
+                        "items": [{"name": "面包", "portion_text": "2片"}],
+                    },
+                    warnings=[],
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="语音转写: 我早上吃了两片面包")],
+        context={},
+    )
+
+    assert result["pending_actions"][0]["draft_payload"]["recorded_at"] == (
+        "2026-05-01T08:00:00+08:00"
+    )

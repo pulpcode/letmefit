@@ -20,9 +20,16 @@ export function greeting(date = new Date()): string {
 
 export function shortTime(iso?: string): string {
   if (!iso) return "";
-  const date = new Date(iso);
+  const date = new Date(normalizeIsoForClient(iso));
   if (Number.isNaN(date.getTime())) return "";
   return `${`${date.getHours()}`.padStart(2, "0")}:${`${date.getMinutes()}`.padStart(2, "0")}`;
+}
+
+function normalizeIsoForClient(iso: string): string {
+  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(iso)) {
+    return iso;
+  }
+  return `${iso}Z`;
 }
 
 export function isoNowWithTimezone(): string {

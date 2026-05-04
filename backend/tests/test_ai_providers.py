@@ -173,6 +173,23 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
         "recent_records",
     ]
     assert "只有 active_pending_actions" in "".join(prompt_json["context_contract"]["rules"])
+    assert "优先读取 recent_records" in "".join(prompt_json["context_contract"]["rules"])
+
+
+def test_bailian_provider_prompt_requires_recent_records_and_nutrition_estimates() -> None:
+    settings = Settings(
+        jwt_secret_key="test-secret-key-with-enough-length",
+        bailian_api_key="sk-test",
+    )
+    provider = BailianExtractionProvider(settings, client=FakeClient(_body_metric_content()))
+
+    body = provider.debug_request_body(_input("我吃了两片面包"))
+    system_prompt = body["messages"][0]["content"]
+
+    assert "conversation_context.recent_records" in system_prompt
+    assert "portion_grams" in system_prompt
+    assert "calories" in system_prompt
+    assert "estimated_nutrition" in system_prompt
 
 
 def test_bailian_debug_request_body_matches_chat_completion_body() -> None:

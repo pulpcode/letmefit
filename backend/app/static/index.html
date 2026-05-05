@@ -206,6 +206,141 @@
         gap: 16px;
       }
 
+      .chat-panel,
+      .pending-panel {
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfcfe;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border-bottom: 1px solid var(--line);
+        padding: 10px 12px;
+      }
+
+      .panel-title {
+        font-weight: 700;
+      }
+
+      .chat-list {
+        display: grid;
+        gap: 10px;
+        max-height: 380px;
+        overflow: auto;
+        padding: 12px;
+      }
+
+      .message {
+        display: grid;
+        gap: 4px;
+        max-width: 86%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 10px;
+        background: #fff;
+      }
+
+      .message.user {
+        justify-self: end;
+        border-color: #c8d8f3;
+        background: #eef5ff;
+      }
+
+      .message.assistant {
+        justify-self: start;
+      }
+
+      .message.has-debug {
+        cursor: pointer;
+      }
+
+      .message.has-debug:hover {
+        border-color: var(--primary);
+      }
+
+      .message-role {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .message-text {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .empty-note {
+        color: var(--muted);
+        padding: 12px;
+      }
+
+      .pending-list {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .pending-card {
+        display: grid;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: #fff;
+      }
+
+      .pending-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .pending-title {
+        font-weight: 700;
+      }
+
+      .meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .kv-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 10px;
+      }
+
+      .kv {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .kv strong {
+        color: var(--text);
+        font-size: 13px;
+      }
+
+      details summary {
+        color: var(--primary);
+        cursor: pointer;
+        font-weight: 650;
+      }
+
+      details pre {
+        min-height: 120px;
+        max-height: 260px;
+        margin-top: 8px;
+      }
+
       @media (max-width: 920px) {
         main {
           grid-template-columns: 1fr;
@@ -338,10 +473,29 @@
           <div class="actions">
             <button id="createConversation">创建会话</button>
             <button class="secondary" id="loadLatestConversation">加载最近待确认会话</button>
+            <button class="secondary" id="refreshMessages">刷新消息历史</button>
             <button id="sendMessage">发送消息</button>
             <button class="secondary" id="listPending">查询动作历史</button>
             <button id="confirmPending">确认动作</button>
             <button id="confirmAllPending">确认全部待确认动作</button>
+          </div>
+          <div class="chat-panel">
+            <div class="panel-head">
+              <span class="panel-title">聊天历史</span>
+              <span class="pill" id="chatCount">0 条消息</span>
+            </div>
+            <div class="chat-list" id="chatList">
+              <div class="empty-note">创建或加载会话后显示消息历史。</div>
+            </div>
+          </div>
+          <div class="pending-panel">
+            <div class="panel-head">
+              <span class="panel-title">待确认动作</span>
+              <span class="pill" id="pendingCount">0 条</span>
+            </div>
+            <div class="pending-list" id="pendingCards">
+              <div class="empty-note">发送餐食或身体指标消息后，待确认动作会显示在这里。</div>
+            </div>
           </div>
         </section>
 
@@ -418,6 +572,8 @@
         conversationId: localStorage.getItem("letmefit_conversation_id") || "",
         pendingActionId: localStorage.getItem("letmefit_pending_action_id") || "",
       };
+      const debugTurns = [];
+      const debugByAssistantMessageId = new Map();
 
       const $ = (id) => document.getElementById(id);
 
@@ -472,6 +628,219 @@
 
       function includeDebugContext() {
         return $("includeDebugContext").checked;
+      }
+
+      function messagePartText(part) {
+        if (!part || typeof part !== "object") {
+          return String(part || "");
+        }
+        if (part.type === "text") {
+          return part.text || "";
+        }
+        if (part.type === "event") {
+          return part.text || part.event_type || "[event]";
+        }
+        if (part.type === "image") {
+          return "[image]";
+        }
+        if (part.type === "audio") {
+          return part.duration_seconds != null ? `[audio ${part.duration_seconds}s]` : "[audio]";
+        }
+        return `[${part.type || "content"}]`;
+      }
+
+      function contentText(content) {
+        if (!Array.isArray(content)) {
+          return String(content || "");
+        }
+        return content.map(messagePartText).filter(Boolean).join("\n");
+      }
+
+      function createElement(tag, className, text) {
+        const element = document.createElement(tag);
+        if (className) {
+          element.className = className;
+        }
+        if (text !== undefined) {
+          element.textContent = text;
+        }
+        return element;
+      }
+
+      function cacheDebugTurn(response, userText) {
+        const data = response?.data;
+        if (!data?.assistant_message_id) {
+          return;
+        }
+        const turn = {
+          userMessageId: data.message_id,
+          assistantMessageId: data.assistant_message_id,
+          userText,
+          assistantText: data.assistant_text,
+          response,
+          createdAt: new Date().toISOString(),
+        };
+        debugTurns.push(turn);
+        debugByAssistantMessageId.set(turn.assistantMessageId, turn);
+      }
+
+      function renderMessages(messages) {
+        const list = $("chatList");
+        list.innerHTML = "";
+        $("chatCount").textContent = `${messages.length} 条消息`;
+        if (!messages.length) {
+          list.appendChild(createElement("div", "empty-note", "暂无消息。"));
+          return;
+        }
+
+        for (const message of messages) {
+          const item = createElement("div", `message ${message.role}`);
+          const debugTurn = debugByAssistantMessageId.get(message.id);
+          if (debugTurn) {
+            item.classList.add("has-debug");
+            item.title = "点击查看这一轮的响应和 LLM 请求 body";
+            item.onclick = () => log(debugTurn.response);
+          }
+          item.appendChild(createElement("div", "message-role", message.role));
+          item.appendChild(createElement("div", "message-text", contentText(message.content)));
+          list.appendChild(item);
+        }
+        list.scrollTop = list.scrollHeight;
+      }
+
+      async function refreshMessages() {
+        if (!$("conversationId").value) {
+          renderMessages([]);
+          return null;
+        }
+        const response = await api(`/conversations/${$("conversationId").value}/messages`);
+        renderMessages(response.data.messages || []);
+        return response;
+      }
+
+      function pendingTitle(action) {
+        if (action.type === "create_meal_record") {
+          return "餐食记录";
+        }
+        if (action.type === "create_body_metric_record") {
+          return "身体指标";
+        }
+        return "待确认动作";
+      }
+
+      function pendingFields(action) {
+        const payload = action.draft_payload || {};
+        if (action.type === "create_meal_record") {
+          const items = Array.isArray(payload.items)
+            ? payload.items.map((item) => item.name || item.alias || "未命名").join("、")
+            : "";
+          return [
+            ["餐别", payload.meal_type || "unknown"],
+            ["食物", items || "待确认"],
+            ["热量", payload.total_calories ?? estimateItemsTotal(payload.items, "calories")],
+            ["蛋白质", payload.total_protein_g ?? estimateItemsTotal(payload.items, "protein_g")],
+          ];
+        }
+        if (action.type === "create_body_metric_record") {
+          return [
+            ["体重", payload.weight_kg],
+            ["体脂率", payload.body_fat_percentage],
+            ["BMI", payload.bmi],
+            ["记录时间", payload.recorded_at],
+          ];
+        }
+        return [["类型", action.type]];
+      }
+
+      function estimateItemsTotal(items, key) {
+        if (!Array.isArray(items)) {
+          return "";
+        }
+        const total = items.reduce((sum, item) => sum + (Number(item?.[key]) || 0), 0);
+        return total ? Number(total.toFixed(1)) : "";
+      }
+
+      function renderPendingActions(actions) {
+        const list = $("pendingCards");
+        list.innerHTML = "";
+        $("pendingCount").textContent = `${actions.length} 条`;
+        if (!actions.length) {
+          list.appendChild(createElement("div", "empty-note", "暂无待确认动作。"));
+          return;
+        }
+
+        for (const action of actions) {
+          const card = createElement("div", "pending-card");
+          const head = createElement("div", "pending-head");
+          head.appendChild(createElement("div", "pending-title", pendingTitle(action)));
+          head.appendChild(createElement("span", "pill", action.status));
+          card.appendChild(head);
+
+          const meta = createElement("div", "meta-row");
+          meta.appendChild(createElement("span", "", `ID: ${action.pending_action_id}`));
+          meta.appendChild(createElement("span", "", `confidence: ${action.confidence ?? "-"}`));
+          if (action.warnings?.length) {
+            meta.appendChild(createElement("span", "", `warnings: ${action.warnings.length}`));
+          }
+          card.appendChild(meta);
+
+          const kvList = createElement("div", "kv-list");
+          for (const [label, value] of pendingFields(action)) {
+            const field = createElement("div", "kv");
+            field.appendChild(createElement("div", "", label));
+            field.appendChild(createElement("strong", "", value == null || value === "" ? "-" : String(value)));
+            kvList.appendChild(field);
+          }
+          card.appendChild(kvList);
+
+          const details = document.createElement("details");
+          details.appendChild(createElement("summary", "", "查看 draft JSON"));
+          const pre = document.createElement("pre");
+          pre.textContent = JSON.stringify(action.draft_payload || {}, null, 2);
+          details.appendChild(pre);
+          card.appendChild(details);
+
+          const actionsRow = createElement("div", "actions");
+          const confirm = createElement("button", "", "确认");
+          confirm.onclick = () => confirmAction(action.pending_action_id);
+          const discard = createElement("button", "secondary", "放弃");
+          discard.onclick = () => discardAction(action.pending_action_id);
+          actionsRow.appendChild(confirm);
+          actionsRow.appendChild(discard);
+          card.appendChild(actionsRow);
+          list.appendChild(card);
+        }
+      }
+
+      async function refreshPendingActions() {
+        if (!$("conversationId").value) {
+          renderPendingActions([]);
+          return null;
+        }
+        const response = await api(`/conversations/${$("conversationId").value}/pending-actions`);
+        const actions = response.data.pending_actions || [];
+        renderPendingActions(actions);
+        const pending = actions.find((action) => action.status === "pending_confirmation");
+        savePendingActionId(pending?.pending_action_id || "");
+        return response;
+      }
+
+      async function confirmAction(pendingActionId) {
+        const response = await run(() =>
+          api(`/agent/pending-actions/${pendingActionId}/confirm`, { method: "POST" }),
+        );
+        await refreshPendingActions();
+        await refreshMessages();
+        return response;
+      }
+
+      async function discardAction(pendingActionId) {
+        const response = await run(() =>
+          api(`/agent/pending-actions/${pendingActionId}/discard`, { method: "POST" }),
+        );
+        await refreshPendingActions();
+        await refreshMessages();
+        return response;
       }
 
       function log(value) {
@@ -636,6 +1005,8 @@
           });
           saveConversationId(response.data.conversation_id);
           savePendingActionId("");
+          renderMessages([]);
+          renderPendingActions([]);
           return response;
         });
 
@@ -655,6 +1026,8 @@
               pendingResponse = response;
               saveConversationId(conversation.id);
               savePendingActionId(pending.pending_action_id);
+              await refreshMessages();
+              renderPendingActions(response.data.pending_actions || []);
               return {
                 selected_conversation: conversation,
                 pending_actions: response.data.pending_actions,
@@ -664,6 +1037,8 @@
           if (selected) {
             saveConversationId(selected.id);
             pendingResponse = await api(`/conversations/${selected.id}/pending-actions`);
+            await refreshMessages();
+            renderPendingActions(pendingResponse.data.pending_actions || []);
           }
           return {
             selected_conversation: selected,
@@ -671,20 +1046,26 @@
           };
         });
 
+      $("refreshMessages").onclick = () => run(() => refreshMessages());
+
       $("sendMessage").onclick = () =>
         run(async () => {
           const conversationId = $("conversationId").value;
+          const userText = $("messageText").value;
           const response = await api(`/conversations/${conversationId}/messages`, {
             method: "POST",
             body: {
-              content: [{ type: "text", text: $("messageText").value }],
+              content: [{ type: "text", text: userText }],
               include_debug_context: includeDebugContext(),
             },
           });
+          cacheDebugTurn(response, userText);
           const action = response.data.pending_actions?.[0];
           if (action) {
             savePendingActionId(action.pending_action_id);
           }
+          await refreshMessages();
+          await refreshPendingActions();
           return response;
         });
 
@@ -729,10 +1110,13 @@
               ],
             },
           });
+          cacheDebugTurn(response, audioPrompt());
           const action = response.data.pending_actions?.[0];
           if (action) {
             savePendingActionId(action.pending_action_id);
           }
+          await refreshMessages();
+          await refreshPendingActions();
           return response;
         });
 
@@ -771,10 +1155,13 @@
               ],
             },
           });
+          cacheDebugTurn(messageResponse, audioPrompt());
           const action = messageResponse.data.pending_actions?.[0];
           if (action) {
             savePendingActionId(action.pending_action_id);
           }
+          await refreshMessages();
+          await refreshPendingActions();
           return {
             upload: uploadResponse.data.file,
             message: messageResponse.data,
@@ -783,22 +1170,11 @@
 
       $("listPending").onclick = () =>
         run(async () => {
-          const response = await api(`/conversations/${$("conversationId").value}/pending-actions`);
-          const pending = response.data.pending_actions?.find(
-            (action) => action.status === "pending_confirmation",
-          );
-          if (pending) {
-            savePendingActionId(pending.pending_action_id);
-          }
-          return response;
+          return refreshPendingActions();
         });
 
       $("confirmPending").onclick = () =>
-        run(() =>
-          api(`/agent/pending-actions/${$("pendingActionId").value}/confirm`, {
-            method: "POST",
-          }),
-        );
+        confirmAction($("pendingActionId").value);
 
       $("confirmAllPending").onclick = () =>
         run(async () => {
@@ -816,6 +1192,8 @@
             );
             confirmed.push(response.data);
           }
+          await refreshPendingActions();
+          await refreshMessages();
           return { pending_count: pendingActions.length, confirmed };
         });
 
@@ -847,6 +1225,8 @@
           saveConversationId("");
           savePendingActionId("");
           saveAudioFileId("");
+          renderMessages([]);
+          renderPendingActions([]);
           return response;
         });
 
@@ -859,6 +1239,8 @@
           saveConversationId("");
           savePendingActionId("");
           saveAudioFileId("");
+          renderMessages([]);
+          renderPendingActions([]);
           return response;
         });
 
@@ -871,15 +1253,29 @@
         localStorage.removeItem("letmefit_refresh_token");
         localStorage.removeItem("letmefit_conversation_id");
         localStorage.removeItem("letmefit_pending_action_id");
+        debugTurns.length = 0;
+        debugByAssistantMessageId.clear();
+        renderMessages([]);
+        renderPendingActions([]);
         updateState();
         log({ cleared: true });
       };
 
-      $("conversationId").onchange = () => saveConversationId($("conversationId").value);
+      $("conversationId").onchange = () => {
+        saveConversationId($("conversationId").value);
+        run(async () => {
+          await refreshMessages();
+          return refreshPendingActions();
+        });
+      };
       $("pendingActionId").onchange = () => savePendingActionId($("pendingActionId").value);
 
       $("recordDate").value = today();
       updateState();
+      if (state.conversationId && state.accessToken) {
+        refreshMessages().catch(() => null);
+        refreshPendingActions().catch(() => null);
+      }
     </script>
   </body>
 </html>

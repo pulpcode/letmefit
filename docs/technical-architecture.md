@@ -249,7 +249,9 @@ https://dashscope.aliyuncs.com/compatible-mode/v1
 - `mock`：本地开发和测试默认值，不调用外部模型
 - `bailian`：调用百炼 OpenAI-compatible Chat Completions
 
-LLM 结构化输出必须遵循 `docs/ai-extraction-schema-v1.md`。模型输出只能生成候选动作；是否自动写入正式记录由后端规则决定。
+LLM 结构化输出必须遵循 `docs/ai-extraction-schema-v1.md`。模型输出只能请求后端工具；
+工具是否被接受、是否生成确认卡、是否自动写入正式记录由后端规则决定。
+当前工具调用通道和 agent loop 边界见 `docs/agent-tool-call-design.md`。
 
 V1 不要求准备 TTS 文本转语音模型。除非产品明确要“Agent 语音回复”，否则先只做语音输入，输出仍以文本和对话式确认卡片为主。
 

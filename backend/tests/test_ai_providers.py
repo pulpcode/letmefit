@@ -66,11 +66,11 @@ def _body_metric_content() -> str:
             "requires_review": True,
             "confidence": 0.82,
             "warnings": [],
-            "pending_actions": [
+            "tool_calls": [
                 {
-                    "type": "create_body_metric_record",
+                    "name": "propose_body_metric_record",
                     "confidence": 0.82,
-                    "draft_payload": {
+                    "arguments": {
                         "recorded_at": "2026-05-01T08:10:00+08:00",
                         "source_type": "text",
                         "weight_kg": 72.4,
@@ -95,7 +95,7 @@ def _offer_content() -> str:
             "requires_review": False,
             "confidence": 0.86,
             "warnings": [],
-            "pending_actions": [],
+            "tool_calls": [],
             "dialogue_state_patch": {
                 "new_active_offer": {
                     "kind": "assistant_offer",
@@ -127,8 +127,8 @@ def test_mock_provider_extracts_body_metric_action() -> None:
 
     assert result.intent == "fitness_record"
     assert result.requires_review is True
-    assert result.action_specs[0].action_type == "create_body_metric_record"
-    assert result.action_specs[0].draft_payload["weight_kg"] == 72.4
+    assert result.tool_calls[0].name == "propose_body_metric_record"
+    assert result.tool_calls[0].arguments["weight_kg"] == 72.4
 
 
 def test_bailian_provider_requires_api_key() -> None:
@@ -158,10 +158,10 @@ def test_bailian_provider_parses_json_mode_response() -> None:
 
     assert result.intent == "fitness_record"
     assert result.confidence is not None
-    assert result.action_specs[0].action_type == "create_body_metric_record"
-    assert result.action_specs[0].grounding is not None
-    assert result.action_specs[0].grounding.source == "user_current_turn"
-    assert result.action_specs[0].draft_payload["weight_kg"] == 72.4
+    assert result.tool_calls[0].name == "propose_body_metric_record"
+    assert result.tool_calls[0].grounding is not None
+    assert result.tool_calls[0].grounding.source == "user_current_turn"
+    assert result.tool_calls[0].arguments["weight_kg"] == 72.4
     call = client.completions.calls[0]
     assert call["model"] == "qwen-plus"
     assert call["response_format"] == {"type": "json_object"}
@@ -224,11 +224,11 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     assert "active_offer 在本轮结束后会失效" in "".join(
         prompt_json["context_contract"]["rules"]
     )
-    assert "pending_actions 必须带 grounding" in "".join(
+    assert "记录类 tool_calls 必须带 grounding" in "".join(
         prompt_json["context_contract"]["rules"]
     )
     system_prompt = client.completions.calls[0]["messages"][0]["content"]
-    assert "每个 pending_action 必须包含 grounding 字段" in system_prompt
+    assert "每个 tool_call 必须包含 grounding 字段" in system_prompt
     assert "assistant_generated 不能作为写入记录或确认卡依据" in system_prompt
     assert "dialogue_state_patch 不能包含 profile" in "".join(
         prompt_json["context_contract"]["rules"]
@@ -284,7 +284,7 @@ def test_bailian_provider_repairs_invalid_json_response() -> None:
 
     result = provider.extract(_input("今天体重72.4公斤"))
 
-    assert result.action_specs[0].draft_payload["weight_kg"] == 72.4
+    assert result.tool_calls[0].arguments["weight_kg"] == 72.4
     assert len(client.completions.calls) == 2
     repair_messages = client.completions.calls[1]["messages"]
     assert repair_messages[-1]["role"] == "user"
@@ -300,7 +300,7 @@ def test_bailian_provider_rejects_invalid_schema_response() -> None:
                 "requires_review": False,
                 "confidence": 0.5,
                 "warnings": [],
-                "pending_actions": [],
+                "tool_calls": [],
             }
         )
     )

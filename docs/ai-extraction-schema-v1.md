@@ -53,7 +53,7 @@ The model must return one JSON object:
   "confidence": 0.82,
   "warnings": [],
   "dialogue_state_patch": null,
-  "pending_actions": []
+  "tool_calls": []
 }
 ```
 
@@ -65,8 +65,8 @@ Fields:
 - `confidence`: 0-1 model confidence
 - `warnings`: low-confidence or missing-field warnings
 - `dialogue_state_patch`: optional one-turn dialogue-state hint; does not write formal facts
-- `pending_actions`: candidate write actions; backend may auto-commit clear actions or create pending actions
-- `pending_actions[].grounding`: required evidence metadata for every candidate write action
+- `tool_calls`: requested backend tools; backend may auto-commit clear record tools or create pending actions
+- `tool_calls[].grounding`: required evidence metadata for every record tool call
 
 ## Dialogue State Patch
 
@@ -96,13 +96,13 @@ Rules:
 - It must not contain profile, records, pending actions, draft payloads, or formal facts.
 - The backend treats it as a one-user-turn token and clears it after the next user message.
 
-## Pending Action Types
+## Record Tool Calls
 
-Supported V1 action types:
+Supported V1 record tools:
 
 ```text
-create_meal_record
-create_body_metric_record
+propose_meal_record
+propose_body_metric_record
 ```
 
 Planned but not yet committed through LLM:
@@ -113,7 +113,7 @@ generate_daily_summary
 
 ## Pending Action Grounding
 
-Every pending action must include:
+Every record tool call must include:
 
 ```json
 {
@@ -132,17 +132,17 @@ Allowed values:
 Rules:
 
 - `evidence_text` must be an exact substring from the current user message.
-- The backend only accepts `source=user_current_turn` actions whose `evidence_text` is present in the current user message.
-- `assistant_generated` actions are discarded by the backend and must not create confirmation cards.
-- Planning, recommendation, and advice responses must use `pending_actions=[]`.
+- The backend only executes `source=user_current_turn` record tools whose `evidence_text` is present in the current user message.
+- `assistant_generated` tool calls are rejected by the backend and must not create confirmation cards.
+- Planning, recommendation, and advice responses must use `tool_calls=[]`.
 
 ## Meal Record Draft
 
 ```json
 {
-  "type": "create_meal_record",
+  "name": "propose_meal_record",
   "confidence": 0.78,
-  "draft_payload": {
+  "arguments": {
     "recorded_at": "2026-05-01T12:30:00+08:00",
     "source_type": "text",
     "meal_type": "lunch",
@@ -184,9 +184,9 @@ Rules:
 
 ```json
 {
-  "type": "create_body_metric_record",
+  "name": "propose_body_metric_record",
   "confidence": 0.82,
-  "draft_payload": {
+  "arguments": {
     "recorded_at": "2026-05-01T08:10:00+08:00",
     "source_type": "text",
     "weight_kg": 72.4,
@@ -214,7 +214,7 @@ Rules:
 
 ## Safety
 
-The model must return `out_of_scope` with no pending actions for:
+The model must return `out_of_scope` with no tool calls for:
 
 - medical diagnosis
 - treatment advice
@@ -232,6 +232,6 @@ Example:
   "requires_review": false,
   "confidence": 0.9,
   "warnings": [],
-  "pending_actions": []
+  "tool_calls": []
 }
 ```

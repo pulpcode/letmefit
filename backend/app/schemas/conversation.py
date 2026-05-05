@@ -55,4 +55,5 @@ class MessageSendResponse(BaseModel):
     requires_review: bool
     pending_actions: list[dict]
     committed_records: list[dict] = Field(default_factory=list)
+    tool_results: list[dict] = Field(default_factory=list)
     debug_context: dict[str, Any] | None = None

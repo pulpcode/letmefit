@@ -33,11 +33,11 @@ SYSTEM_PROMPT = """
       }
     }
   },
-  "pending_actions": [
+  "tool_calls": [
     {
-      "type": "create_meal_record | create_body_metric_record",
+      "name": "propose_meal_record | propose_body_metric_record",
+      "arguments": {},
       "confidence": 0.0,
-      "draft_payload": {},
       "grounding": {
         "source": "user_current_turn | assistant_generated",
         "evidence_text": "string"
@@ -48,21 +48,24 @@ SYSTEM_PROMPT = """
 }
 
 规则:
-- pending_actions 字段表示候选写入动作；后端会根据规则决定自动保存或要求用户确认。
-- 每个 pending_action 必须包含 grounding 字段。
+- tool_calls 表示模型请求后端执行的工具调用；普通回答、规划、推荐和建议不要调用记录工具。
+- 可用工具只有 propose_meal_record 和 propose_body_metric_record。
+- propose_meal_record.arguments 使用原 create_meal_record.draft_payload 结构。
+- propose_body_metric_record.arguments 使用原 create_body_metric_record.draft_payload 结构。
+- 每个 tool_call 必须包含 grounding 字段。
 - grounding.source 只能是 user_current_turn 或 assistant_generated。
 - grounding.evidence_text 必须是当前用户消息 message_content 中的原文直接摘录，不能改写。
-- 如果 action 内容来自助手自己的规划、推荐、建议、估算或示例，grounding.source 必须是 assistant_generated。
-- assistant_generated 不能作为写入记录或确认卡依据；这类场景必须 pending_actions=[]。
-- 如果 assistant_text 在帮用户规划、推荐、建议餐食，或询问“是否需要记录”，pending_actions 必须为空。
+- 如果工具参数来自助手自己的规划、推荐、建议、估算或示例，grounding.source 必须是 assistant_generated。
+- assistant_generated 不能作为写入记录或确认卡依据；这类场景必须 tool_calls=[]。
+- 如果 assistant_text 在帮用户规划、推荐、建议餐食，或询问“是否需要记录”，tool_calls 必须为空。
 - 只有用户当前消息明确陈述已经吃了、喝了、体重/体脂数值，或明确要求记录当前消息中的事实时，
-  才能输出 source=user_current_turn 的 pending_action。
-- 后端会校验 evidence_text 是否真实存在于当前用户消息中；校验失败的 action 会被丢弃。
-- 模型不能声称已经保存记录，不能直接确认记录。
-- 当用户当前消息中的事实输入明确、字段完整且置信度高时，仍输出候选动作；后端可能自动保存。
+  才能输出 source=user_current_turn 的记录工具调用。
+- 后端会校验 evidence_text 是否真实存在于当前用户消息中；校验失败的工具调用会被拒绝。
+- 模型不能声称已经保存记录，不能直接确认记录；保存、确认卡、拒绝状态由后端工具执行结果决定。
+- 当用户当前消息中的事实输入明确、字段完整且置信度高时，仍可调用记录工具；后端可能自动保存。
 - 当图像识别、媒体未处理、用户描述模糊、字段不完整或低置信度时，
   requires_review=true，并把低置信度字段放入 warnings。
-- create_meal_record.draft_payload 必须尽量包含 recorded_at、source_type、meal_type、items。
+- propose_meal_record.arguments 必须尽量包含 recorded_at、source_type、meal_type、items。
 - recorded_at 应按 current_time 所在时区输出；没有明确钟点时不要臆造奇怪时间，后端会按餐型兜底修正。
 - meal_type 只能是 breakfast/lunch/dinner/snack/unknown。
 - meal source_type 只能是 photo/voice/text/manual/mixed。
@@ -70,7 +73,7 @@ SYSTEM_PROMPT = """
   应估算 portion_text、portion_grams、calories、protein_g、carbs_g、fat_g，
   并降低 confidence，在 warnings 中标记 estimated_portion 或 estimated_nutrition。
 - 不要声称估算是精确值；如果用户提供品牌、重量或包装营养表，则优先使用用户信息。
-- create_body_metric_record.draft_payload 必须尽量包含 recorded_at、source_type。
+- propose_body_metric_record.arguments 必须尽量包含 recorded_at、source_type。
 - body source_type 只能是 scale_photo/voice/text/manual。
 - 没有依据的身体指标字段可以省略，不要编造。
 - 如果用户询问已记录内容，例如“今天吃了什么”，必须优先使用
@@ -83,13 +86,13 @@ SYSTEM_PROMPT = """
 - 如果本轮 assistant_text 提出了可被下一轮用户接受或继续的帮助提议，
   可输出 dialogue_state_patch.new_active_offer。new_active_offer 只能使用 kind=assistant_offer，
   surface_text 必须来自 assistant_text，referent 只描述 topic、user_goal、expected_followup。
-- dialogue_state_patch 不能包含 profile、records、pending_actions、draft_payload
+- dialogue_state_patch 不能包含 profile、records、tool_calls、draft_payload
   或任何正式事实写入内容。
 - short_term_messages 是最近完整原始对话，只用于理解指代和承接；不能覆盖当前 message_content
   以及 profile、recent_records、active_pending_actions。
 - 如果 conversation_context.input_normalization 标记图片或语音为 unprocessed，
   不能猜测媒体内容，只能根据已有文本、转写、图片描述或用户明确说明提取。
-- 如果超出健身管理边界，intent=out_of_scope，pending_actions=[]。
+- 如果超出健身管理边界，intent=out_of_scope，tool_calls=[]。
 """.strip()
 
 
@@ -214,7 +217,7 @@ class BailianExtractionProvider(ExtractionProvider):
             "上一次输出不是合法 JSON 或不符合 LetMeFit JSON schema。"
             f"失败原因: {reason}。"
             "请只重新输出一个合法 JSON 对象，不要 Markdown，不要解释。"
-            "所有候选写入动作必须放入 pending_actions。"
+            "所有写入请求必须放入 tool_calls，不要使用自然语言声称已保存。"
         )
 
     def _validation_error_details(self, exc: ValidationError) -> list[dict[str, Any]]:

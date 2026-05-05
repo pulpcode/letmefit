@@ -674,6 +674,14 @@ Agent 接口可以返回自然语言回复、自动写入的正式记录，也�
     "intent": "fitness_record",
     "requires_review": true,
     "committed_records": [],
+    "tool_results": [
+      {
+        "tool_name": "propose_meal_record",
+        "action_type": "create_meal_record",
+        "status": "pending_confirmation",
+        "pending_action_id": "pa_..."
+      }
+    ],
     "pending_actions": [
       {
         "pending_action_id": "pa_...",
@@ -708,6 +716,15 @@ Agent 接口可以返回自然语言回复、自动写入的正式记录，也�
     "intent": "fitness_record",
     "requires_review": false,
     "pending_actions": [],
+    "tool_results": [
+      {
+        "tool_name": "propose_body_metric_record",
+        "action_type": "create_body_metric_record",
+        "status": "committed",
+        "record_type": "body_metric",
+        "record_id": "bm_..."
+      }
+    ],
     "committed_records": [
       {
         "type": "body_metric",

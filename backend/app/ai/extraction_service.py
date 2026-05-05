@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 from app.ai.commit_rules import decide_auto_commit
 from app.ai.draft_normalizer import normalize_pending_action_draft
 from app.ai.providers import ExtractionProvider, get_extraction_provider
-from app.ai.types import ExtractionActionSpec, ExtractionInput, ExtractionProviderResult
+from app.ai.types import (
+    ExtractionActionSpec,
+    ExtractionInput,
+    ExtractionProviderResult,
+    ExtractionToolCall,
+)
 from app.auth.security import new_id, utc_now
 from app.core.config import Settings, get_settings
 from app.models import AgentExtraction, AgentPendingAction
@@ -19,6 +24,19 @@ from app.services.body_metrics import BodyMetricService
 from app.services.meals import MealService
 
 logger = logging.getLogger(__name__)
+
+SAVE_CLAIM_TERMS = (
+    "已保存",
+    "已自动保存",
+    "已经保存",
+    "已为你将",
+    "已为你把",
+    "已将",
+    "已存为",
+    "保存到正式记录",
+    "已记录到",
+    "已经记录到",
+)
 
 
 class ExtractionService:
@@ -49,14 +67,14 @@ class ExtractionService:
                 context=context or {},
             )
         )
-        action_specs = self._filter_action_specs(
-            provider_result.action_specs,
+        tool_calls, tool_results = self._filter_tool_calls(
+            provider_result.tool_calls,
             content=content,
             conversation_id=conversation_id,
             message_id=message_id,
         )
-        if not action_specs:
-            return self._result_response(provider_result, [], [])
+        if not tool_calls:
+            return self._result_response(provider_result, [], [], tool_results)
 
         extraction = AgentExtraction(
             id=new_id("ext"),
@@ -78,7 +96,8 @@ class ExtractionService:
         pending_actions = []
         committed_records = []
         input_text = self._joined_text(content)
-        for action_spec in action_specs:
+        for tool_call in tool_calls:
+            action_spec = tool_call.to_action_spec()
             draft_payload = normalize_pending_action_draft(
                 action_spec.action_type,
                 action_spec.draft_payload,
@@ -98,84 +117,93 @@ class ExtractionService:
             )
             if decision.auto_commit:
                 try:
-                    committed_records.append(
-                        self._auto_commit_action(
-                            user_id=user_id,
-                            conversation_id=conversation_id,
-                            message_id=message_id,
-                            action_type=action_spec.action_type,
-                            draft_payload=draft_payload,
-                            confidence=confidence,
-                            decision_reason=decision.reason,
-                        )
+                    record = self._auto_commit_action(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        action_type=action_spec.action_type,
+                        draft_payload=draft_payload,
+                        confidence=confidence,
+                        decision_reason=decision.reason,
                     )
+                    committed_records.append(record)
+                    tool_results.append(self._tool_result(tool_call, "committed", record=record))
                 except ValidationError:
-                    pending_actions.append(
-                        self._create_pending_action(
-                            user_id=user_id,
-                            conversation_id=conversation_id,
-                            message_id=message_id,
-                            extraction_id=extraction.id,
-                            confidence=confidence,
-                            action_type=action_spec.action_type,
-                            draft_payload=draft_payload,
-                            warnings=[
-                                *action_spec.warnings,
-                                {
-                                    "field": "draft_payload",
-                                    "reason": "auto_commit_validation_failed",
-                                },
-                            ],
-                        )
+                    action = self._create_pending_action(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        extraction_id=extraction.id,
+                        confidence=confidence,
+                        action_type=action_spec.action_type,
+                        draft_payload=draft_payload,
+                        warnings=[
+                            *action_spec.warnings,
+                            {
+                                "field": "draft_payload",
+                                "reason": "auto_commit_validation_failed",
+                            },
+                        ],
+                    )
+                    pending_actions.append(action)
+                    tool_results.append(
+                        self._tool_result(tool_call, "pending_confirmation", action=action)
                     )
                 continue
 
-            pending_actions.append(
-                self._create_pending_action(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    message_id=message_id,
-                    extraction_id=extraction.id,
-                    confidence=confidence,
-                    action_type=action_spec.action_type,
-                    draft_payload=draft_payload,
-                    warnings=action_spec.warnings,
-                )
+            action = self._create_pending_action(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                extraction_id=extraction.id,
+                confidence=confidence,
+                action_type=action_spec.action_type,
+                draft_payload=draft_payload,
+                warnings=action_spec.warnings,
             )
+            pending_actions.append(action)
+            tool_results.append(self._tool_result(tool_call, "pending_confirmation", action=action))
         extraction.requires_confirmation = bool(pending_actions)
-        return self._result_response(provider_result, pending_actions, committed_records)
+        return self._result_response(
+            provider_result,
+            pending_actions,
+            committed_records,
+            tool_results,
+        )
 
-    def _filter_action_specs(
+    def _filter_tool_calls(
         self,
-        action_specs: list[ExtractionActionSpec],
+        tool_calls: list[ExtractionToolCall],
         content: list[MessageContentItem],
         conversation_id: str,
         message_id: str,
-    ) -> list[ExtractionActionSpec]:
-        if not action_specs:
-            return []
+    ) -> tuple[list[ExtractionToolCall], list[dict[str, Any]]]:
+        if not tool_calls:
+            return [], []
 
         input_text = self._joined_text(content)
         kept = []
-        for action_spec in action_specs:
-            drop_reason = self._action_drop_reason(action_spec, input_text)
+        tool_results = []
+        for tool_call in tool_calls:
+            drop_reason = self._tool_call_drop_reason(tool_call, input_text)
             if drop_reason:
-                self._log_dropped_action(
-                    action_spec=action_spec,
+                self._log_rejected_tool_call(
+                    tool_call=tool_call,
                     reason=drop_reason,
                     conversation_id=conversation_id,
                     message_id=message_id,
                 )
+                tool_results.append(self._tool_result(tool_call, "rejected", reason=drop_reason))
                 continue
-            kept.append(action_spec)
-        return kept
+            kept.append(tool_call)
+        return kept, tool_results
 
-    def _action_drop_reason(
+    def _tool_call_drop_reason(
         self,
-        action_spec: ExtractionActionSpec,
+        tool_call: ExtractionToolCall,
         input_text: str,
     ) -> str | None:
-        grounding = action_spec.grounding
+        grounding = tool_call.grounding
         if grounding is None:
             return "grounding_missing"
         if grounding.source != "user_current_turn":
@@ -188,20 +216,46 @@ class ExtractionService:
             return "evidence_not_in_user_message"
         return None
 
-    def _log_dropped_action(
+    def _log_rejected_tool_call(
         self,
-        action_spec: ExtractionActionSpec,
+        tool_call: ExtractionToolCall,
         reason: str,
         conversation_id: str,
         message_id: str,
     ) -> None:
         logger.info(
-            "action_guard_dropped action_type=%s reason=%s conversation_id=%s message_id=%s",
-            action_spec.action_type,
+            (
+                "ai_tool_call_rejected tool_name=%s action_type=%s reason=%s "
+                "conversation_id=%s message_id=%s"
+            ),
+            tool_call.name,
+            tool_call.action_type,
             reason,
             conversation_id,
             message_id,
         )
+
+    def _tool_result(
+        self,
+        tool_call: ExtractionToolCall,
+        status: str,
+        reason: str | None = None,
+        action: AgentPendingAction | None = None,
+        record: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        result = {
+            "tool_name": tool_call.name,
+            "action_type": tool_call.action_type,
+            "status": status,
+        }
+        if reason:
+            result["reason"] = reason
+        if action is not None:
+            result["pending_action_id"] = action.id
+        if record is not None:
+            result["record_type"] = record["type"]
+            result["record_id"] = record["record_id"]
+        return result
 
     def _create_pending_action(
         self,
@@ -268,23 +322,28 @@ class ExtractionService:
         provider_result: ExtractionProviderResult,
         pending_actions: list[AgentPendingAction],
         committed_records: list[dict[str, Any]],
+        tool_results: list[dict[str, Any]] | None = None,
     ) -> dict:
+        tool_results = tool_results or []
         pending_response = [self._pending_response(action) for action in pending_actions]
         return {
             "assistant_text": self._assistant_text(
                 provider_result.assistant_text,
                 pending_response,
                 committed_records,
+                tool_results,
             ),
             "assistant_content": self._assistant_content(
                 provider_result.assistant_text,
                 pending_response,
                 committed_records,
+                tool_results,
             ),
             "intent": provider_result.intent,
             "requires_review": bool(pending_actions),
             "pending_actions": pending_response,
             "committed_records": committed_records,
+            "tool_results": tool_results,
             "dialogue_state_patch": provider_result.dialogue_state_patch,
         }
 
@@ -326,43 +385,93 @@ class ExtractionService:
         provider_text: str,
         pending_actions: list[dict],
         committed_records: list[dict[str, Any]],
+        tool_results: list[dict[str, Any]],
     ) -> str:
-        if not committed_records:
-            return provider_text
-
-        committed_text = " ".join(item["message"] for item in committed_records)
+        if committed_records:
+            committed_text = " ".join(item["message"] for item in committed_records)
+            if pending_actions:
+                return f"{committed_text} 另有 {len(pending_actions)} 条记录草稿需要你确认。"
+            return committed_text
         if pending_actions:
-            return f"{committed_text} 另有 {len(pending_actions)} 条记录草稿需要你确认。"
-        return committed_text
+            return self._pending_actions_text(pending_actions)
+        if self._has_rejected_tool_call(tool_results) and self._contains_save_claim(provider_text):
+            return self._no_record_saved_text()
+        return self._sanitize_provider_text(provider_text)
 
     def _assistant_content(
         self,
         provider_text: str,
         pending_actions: list[dict],
         committed_records: list[dict[str, Any]],
+        tool_results: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not committed_records:
-            return [{"type": "text", "text": provider_text}]
-
-        content = [
-            {
-                "type": "event",
-                "event_type": "record_auto_committed",
-                "text": item["message"],
-                "record_type": item["type"],
-                "record_id": item["record_id"],
-                "source_message_id": item["source_message_id"],
-            }
-            for item in committed_records
-        ]
-        if pending_actions:
-            content.append(
+        if committed_records:
+            content = [
                 {
-                    "type": "text",
-                    "text": f"另有 {len(pending_actions)} 条记录草稿需要你确认。",
+                    "type": "event",
+                    "event_type": "record_auto_committed",
+                    "text": item["message"],
+                    "record_type": item["type"],
+                    "record_id": item["record_id"],
+                    "source_message_id": item["source_message_id"],
                 }
-            )
-        return content
+                for item in committed_records
+            ]
+            if pending_actions:
+                content.append(
+                    {
+                        "type": "text",
+                        "text": f"另有 {len(pending_actions)} 条记录草稿需要你确认。",
+                    }
+                )
+            return content
+
+        return [
+            {
+                "type": "text",
+                "text": self._assistant_text(
+                    provider_text,
+                    pending_actions,
+                    committed_records,
+                    tool_results,
+                ),
+            }
+        ]
+
+    def _pending_actions_text(self, pending_actions: list[dict]) -> str:
+        if len(pending_actions) == 1:
+            action_type = pending_actions[0].get("type")
+            if action_type == "create_meal_record":
+                return (
+                    "我整理出一条餐食记录草稿，尚未保存为正式记录，"
+                    "请确认或修改后再保存。"
+                )
+            if action_type == "create_body_metric_record":
+                return (
+                    "我整理出一条身体指标草稿，尚未保存为正式记录，"
+                    "请确认或修改后再保存。"
+                )
+        return (
+            f"我整理出 {len(pending_actions)} 条记录草稿，尚未保存为正式记录，"
+            "请逐项确认或修改后再保存。"
+        )
+
+    def _has_rejected_tool_call(self, tool_results: list[dict[str, Any]]) -> bool:
+        return any(result.get("status") == "rejected" for result in tool_results)
+
+    def _sanitize_provider_text(self, provider_text: str) -> str:
+        if self._contains_save_claim(provider_text):
+            return self._no_record_saved_text()
+        return provider_text
+
+    def _contains_save_claim(self, text: str) -> bool:
+        return any(term in text for term in SAVE_CLAIM_TERMS)
+
+    def _no_record_saved_text(self) -> str:
+        return (
+            "这份内容尚未保存为正式记录。当前只会记录你本轮明确说出的实际饮食或身体指标。"
+            "如果你已经实际吃了这份内容，请直接告诉我实际吃了什么，我再帮你记录。"
+        )
 
     def _auto_commit_text(self, record_type: str, record: dict[str, Any]) -> str:
         if record_type == "meal":

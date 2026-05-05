@@ -5,7 +5,7 @@ from app.ai.extraction_service import ExtractionService
 from app.ai.providers.base import ExtractionProvider
 from app.ai.types import (
     ActionGrounding,
-    ExtractionActionSpec,
+    ExtractionToolCall,
     ExtractionInput,
     ExtractionProviderResult,
 )
@@ -71,11 +71,11 @@ def test_extraction_service_auto_commits_clear_body_metric(monkeypatch) -> None:
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.90"),
-            action_specs=[
-                ExtractionActionSpec(
-                    action_type="create_body_metric_record",
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_body_metric_record",
                     confidence=Decimal("0.90"),
-                    draft_payload={
+                    arguments={
                         "recorded_at": "2026-05-01T08:10:00+08:00",
                         "source_type": "text",
                         "weight_kg": 72.4,
@@ -114,11 +114,11 @@ def test_extraction_service_keeps_fuzzy_meal_as_pending() -> None:
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.90"),
-            action_specs=[
-                ExtractionActionSpec(
-                    action_type="create_meal_record",
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
                     confidence=Decimal("0.90"),
-                    draft_payload={
+                    arguments={
                         "recorded_at": "2026-05-01T12:30:00+08:00",
                         "source_type": "text",
                         "meal_type": "lunch",
@@ -159,11 +159,11 @@ def test_extraction_service_normalizes_backfilled_meal_time(monkeypatch) -> None
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.70"),
-            action_specs=[
-                ExtractionActionSpec(
-                    action_type="create_meal_record",
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
                     confidence=Decimal("0.70"),
-                    draft_payload={
+                    arguments={
                         "recorded_at": "2026-05-01T23:00:00+08:00",
                         "recorded_tz": "Asia/Shanghai",
                         "source_type": "voice",
@@ -203,11 +203,11 @@ def test_extraction_service_drops_assistant_generated_action(caplog) -> None:
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.92"),
-            action_specs=[
-                ExtractionActionSpec(
-                    action_type="create_meal_record",
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
                     confidence=Decimal("0.92"),
-                    draft_payload={
+                    arguments={
                         "recorded_at": "2026-05-05T19:33:00+08:00",
                         "source_type": "manual",
                         "meal_type": "dinner",
@@ -237,8 +237,53 @@ def test_extraction_service_drops_assistant_generated_action(caplog) -> None:
     assert result["pending_actions"] == []
     assert result["requires_review"] is False
     assert db.added == []
-    assert "action_guard_dropped" in caplog.text
+    assert "ai_tool_call_rejected" in caplog.text
     assert "source=assistant_generated" in caplog.text
+
+
+def test_extraction_service_rewrites_false_saved_text_after_rejected_tool() -> None:
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text=(
+                "已为你将规划的晚餐存为今晚的正式记录："
+                "清蒸鲈鱼、西兰花炒蒜、杂粮饭。"
+            ),
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.92"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
+                    confidence=Decimal("0.92"),
+                    arguments={
+                        "recorded_at": "2026-05-05T19:33:00+08:00",
+                        "source_type": "manual",
+                        "meal_type": "dinner",
+                        "items": [{"name": "清蒸鲈鱼", "portion_text": "120g"}],
+                    },
+                    grounding=ActionGrounding(
+                        source="assistant_generated",
+                        evidence_text="可以，就这么记录吧",
+                    ),
+                    warnings=[],
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="可以，就这么记录吧")],
+        context={},
+    )
+
+    assert result["pending_actions"] == []
+    assert result["committed_records"] == []
+    assert result["tool_results"][0]["status"] == "rejected"
+    assert "尚未保存为正式记录" in result["assistant_text"]
 
 
 def test_extraction_service_drops_missing_grounding() -> None:
@@ -248,11 +293,11 @@ def test_extraction_service_drops_missing_grounding() -> None:
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.80"),
-            action_specs=[
-                ExtractionActionSpec(
-                    action_type="create_meal_record",
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
                     confidence=Decimal("0.80"),
-                    draft_payload={
+                    arguments={
                         "recorded_at": "2026-05-05T19:33:00+08:00",
                         "source_type": "text",
                         "meal_type": "dinner",
@@ -284,11 +329,11 @@ def test_extraction_service_drops_empty_evidence() -> None:
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.80"),
-            action_specs=[
-                ExtractionActionSpec(
-                    action_type="create_meal_record",
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
                     confidence=Decimal("0.80"),
-                    draft_payload={
+                    arguments={
                         "recorded_at": "2026-05-05T19:33:00+08:00",
                         "source_type": "text",
                         "meal_type": "dinner",
@@ -324,11 +369,11 @@ def test_extraction_service_drops_fabricated_evidence() -> None:
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.80"),
-            action_specs=[
-                ExtractionActionSpec(
-                    action_type="create_meal_record",
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
                     confidence=Decimal("0.80"),
-                    draft_payload={
+                    arguments={
                         "recorded_at": "2026-05-05T19:33:00+08:00",
                         "source_type": "text",
                         "meal_type": "dinner",
@@ -364,11 +409,11 @@ def test_extraction_service_keeps_valid_grounding() -> None:
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.70"),
-            action_specs=[
-                ExtractionActionSpec(
-                    action_type="create_meal_record",
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
                     confidence=Decimal("0.70"),
-                    draft_payload={
+                    arguments={
                         "recorded_at": "2026-05-05T19:33:00+08:00",
                         "source_type": "text",
                         "meal_type": "dinner",

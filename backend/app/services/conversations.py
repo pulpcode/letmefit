@@ -159,6 +159,7 @@ class ConversationService:
             "requires_review": extraction_result["requires_review"],
             "pending_actions": extraction_result["pending_actions"],
             "committed_records": extraction_result["committed_records"],
+            "tool_results": extraction_result.get("tool_results", []),
         }
         if debug_context is not None:
             response["debug_context"] = debug_context

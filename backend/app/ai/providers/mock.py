@@ -6,9 +6,9 @@ from typing import Any
 from app.ai.providers.base import ExtractionProvider
 from app.ai.types import (
     ActionGrounding,
-    ExtractionActionSpec,
     ExtractionInput,
     ExtractionProviderResult,
+    ExtractionToolCall,
 )
 from app.core.config import Settings, get_settings
 from app.schemas.conversation import MessageContentItem
@@ -34,8 +34,8 @@ class MockExtractionProvider(ExtractionProvider):
                 raw_output={"mock": True, "text": text},
             )
 
-        action_specs = self._action_specs(text, payload.content)
-        if not action_specs:
+        tool_calls = self._tool_calls(text, payload.content)
+        if not tool_calls:
             return ExtractionProviderResult(
                 assistant_text=(
                     "我可以帮你记录饮食、体重和训练相关信息。"
@@ -48,37 +48,37 @@ class MockExtractionProvider(ExtractionProvider):
             )
 
         return ExtractionProviderResult(
-            assistant_text=self._assistant_text(action_specs),
+            assistant_text=self._assistant_text(tool_calls),
             intent="fitness_record",
             requires_review=True,
             confidence=Decimal("0.60"),
-            action_specs=action_specs,
+            tool_calls=tool_calls,
             raw_output={"mock": True, "text": text},
         )
 
-    def _action_specs(
+    def _tool_calls(
         self,
         text: str,
         content: list[MessageContentItem],
-    ) -> list[ExtractionActionSpec]:
-        specs = []
+    ) -> list[ExtractionToolCall]:
+        tool_calls = []
         lowered = text.lower()
         has_image = any(item.type == "image" for item in content)
         meal_keywords = ("早餐", "午餐", "晚餐", "加餐", "吃", "餐", "meal", "lunch", "dinner")
         if has_image or any(keyword in lowered for keyword in meal_keywords):
-            specs.append(self._meal_spec(lowered, has_image, text))
+            tool_calls.append(self._meal_tool_call(lowered, has_image, text))
 
         body_keywords = ("体重", "体脂", "bmi", "weight", "公斤", "kg", "斤")
         if any(keyword in lowered for keyword in body_keywords):
-            specs.append(self._body_metric_spec(lowered, text))
-        return specs
+            tool_calls.append(self._body_metric_tool_call(lowered, text))
+        return tool_calls
 
-    def _meal_spec(
+    def _meal_tool_call(
         self,
         text: str,
         has_image: bool,
         evidence_text: str,
-    ) -> ExtractionActionSpec:
+    ) -> ExtractionToolCall:
         meal_type = "unknown"
         if "早餐" in text or "breakfast" in text:
             meal_type = "breakfast"
@@ -109,10 +109,10 @@ class MockExtractionProvider(ExtractionProvider):
                     "reason": "mock_extraction_requires_user_confirmation",
                 }
             ]
-        return ExtractionActionSpec(
-            action_type="create_meal_record",
+        return ExtractionToolCall(
+            name="propose_meal_record",
             confidence=confidence,
-            draft_payload={
+            arguments={
                 "recorded_at": self._now_iso(),
                 "source_type": "photo" if has_image else "text",
                 "meal_type": meal_type,
@@ -123,7 +123,7 @@ class MockExtractionProvider(ExtractionProvider):
             warnings=warnings,
         )
 
-    def _body_metric_spec(self, text: str, evidence_text: str) -> ExtractionActionSpec:
+    def _body_metric_tool_call(self, text: str, evidence_text: str) -> ExtractionToolCall:
         weight_kg = self._extract_weight_kg(text)
         confidence = Decimal("0.90") if weight_kg is not None else Decimal("0.35")
         draft_payload: dict[str, Any] = {
@@ -137,10 +137,10 @@ class MockExtractionProvider(ExtractionProvider):
         else:
             warnings.append({"field": "weight_kg", "reason": "missing_or_low_confidence"})
 
-        return ExtractionActionSpec(
-            action_type="create_body_metric_record",
+        return ExtractionToolCall(
+            name="propose_body_metric_record",
             confidence=confidence,
-            draft_payload=draft_payload,
+            arguments=draft_payload,
             grounding=self._grounding(evidence_text),
             warnings=warnings,
         )
@@ -177,13 +177,10 @@ class MockExtractionProvider(ExtractionProvider):
                 value = value[: -len(suffix)]
         return value.strip(" ，,。.;；、")
 
-    def _assistant_text(self, action_specs: list[ExtractionActionSpec]) -> str:
-        if len(action_specs) == 1 and action_specs[0].action_type == "create_meal_record":
+    def _assistant_text(self, tool_calls: list[ExtractionToolCall]) -> str:
+        if len(tool_calls) == 1 and tool_calls[0].name == "propose_meal_record":
             return "我先整理成一条餐食记录草稿，请确认或修改后再保存。"
-        if (
-            len(action_specs) == 1
-            and action_specs[0].action_type == "create_body_metric_record"
-        ):
+        if len(tool_calls) == 1 and tool_calls[0].name == "propose_body_metric_record":
             return "我先整理成一条身体指标草稿，请确认或修改后再保存。"
         return "我整理出了几个待确认动作，请逐项确认或修改后再保存。"
 

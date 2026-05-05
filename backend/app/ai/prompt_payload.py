@@ -45,8 +45,8 @@ CONTEXT_CONTRACT = {
         "只有 input_normalization 中 status 为 transcribed 或 described 的媒体内容可用于提取。",
         "如果当前消息是问候、新问题或无关输入，不要延续上一轮待确认话题。",
         (
-            "pending_actions 必须带 grounding；只有 grounding.source=user_current_turn 且 "
-            "evidence_text 来自当前 message_content 原文的动作才可能被后端接受。"
+            "记录类 tool_calls 必须带 grounding；只有 grounding.source=user_current_turn 且 "
+            "evidence_text 来自当前 message_content 原文的工具调用才可能被后端接受。"
         ),
         "助手自己规划、推荐、建议或估算出的内容不能作为用户事实写入记录。",
     ],

@@ -169,6 +169,19 @@ def test_message_context_serializes_created_at() -> None:
     assert "content" not in context
 
 
+def test_full_message_context_keeps_original_content() -> None:
+    builder = ConversationContextBuilder(
+        db=object(),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+
+    message = _message("msg_1", "assistant", "需要我帮你规划晚餐吗？")
+    context = builder._full_message_context(message)
+
+    assert context["content"] == [{"type": "text", "text": "需要我帮你规划晚餐吗？"}]
+    assert context["content_preview"] == "需要我帮你规划晚餐吗？"
+
+
 def test_estimate_tokens_returns_small_positive_number() -> None:
     assert estimate_tokens("今天午餐吃了鸡胸肉") >= 1
     assert estimate_tokens("") == 0

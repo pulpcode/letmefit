@@ -32,4 +32,5 @@ class ExtractionProviderResult:
     confidence: Decimal | None
     action_specs: list[ExtractionActionSpec] = field(default_factory=list)
     warnings: list[dict[str, Any]] = field(default_factory=list)
+    dialogue_state_patch: dict[str, Any] | None = None
     raw_output: dict[str, Any] = field(default_factory=dict)

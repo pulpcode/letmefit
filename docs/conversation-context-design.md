@@ -160,10 +160,15 @@ image file_id
 
 ```json
 {
+  "memory_policy": {},
   "policy": {},
+  "ephemeral_state": {},
+  "durable_context": {},
   "profile": {},
+  "latest_conversation_summary": {},
   "conversation_summary": {},
   "recent_messages": [],
+  "short_term_messages": [],
   "active_pending_actions": [],
   "recent_records": {
     "meals": [],
@@ -173,7 +178,42 @@ image file_id
 }
 ```
 
-### 4.1 policy
+### 4.1 memory_policy
+
+`memory_policy` 是新的上下文策略字段：
+
+```json
+{
+  "summary_mode": "async_rolling",
+  "short_term_full_turns": 4,
+  "short_term_message_limit": 8,
+  "recent_preview_message_limit": 8
+}
+```
+
+`policy` 暂时保留用于兼容旧调试输出。
+
+### 4.2 ephemeral_state / durable_context
+
+`ephemeral_state.active_offer` 是上一轮助手提出的通用一次性承接令牌，例如“需要我帮你规划晚餐吗？”。它不使用固定业务枚举，而是保存助手原话和通用 referent：
+
+```json
+{
+  "kind": "assistant_offer",
+  "surface_text": "需要我帮你规划晚餐吗？",
+  "referent": {
+    "topic": "晚餐方案",
+    "user_goal": "基于今日记录安排晚餐",
+    "expected_followup": "用户同意时直接生成晚餐方案"
+  }
+}
+```
+
+它只允许在用户下一条消息明确接受或继续该提议时使用；无论用户接茬、拒绝还是转移话题，本轮结束后旧 `active_offer` 都会失效。新 offer 由 LLM 输出 `dialogue_state_patch.new_active_offer`，后端只做结构校验和一回合生命周期管理。
+
+更长期的主题线索放在 `durable_context`，例如 `last_topic`。这类信息只能帮助理解上下文，不能自动消费用户的“好的/可以”。
+
+### 4.3 legacy policy
 
 ```json
 {
@@ -184,10 +224,10 @@ image file_id
 
 | 字段 | 含义 |
 | --- | --- |
-| `summary_mode` | 当前使用滚动摘要压缩旧消息 |
+| `summary_mode` | 兼容字段；新逻辑使用 `memory_policy.summary_mode=async_rolling` |
 | `recent_message_limit` | 每次最多带入多少条未被摘要覆盖的最近消息 |
 
-### 4.2 profile
+### 4.4 profile
 
 来自 `user_profiles`，用于长期稳定的用户档案。
 
@@ -206,7 +246,7 @@ image file_id
 
 `profile` 是正式用户档案，可信度高于普通历史对话。
 
-### 4.3 conversation_summary
+### 4.5 latest_conversation_summary / conversation_summary
 
 来自 `conversation_summaries`，用于压缩旧对话。
 
@@ -223,7 +263,9 @@ image file_id
 
 注意：摘要只是上下文线索，不能当作正式记录。正式事实必须来自 `profile`、`recent_records` 或当前 `active_pending_actions`。
 
-### 4.4 recent_messages
+`latest_conversation_summary` 是新字段，只读取 `status=succeeded` 的最新摘要。`conversation_summary` 暂时作为兼容别名保留。
+
+### 4.6 recent_messages / short_term_messages
 
 最近消息来自 `conversation_messages`。当前消息会通过 `exclude_message_id` 排除，因此 `recent_messages` 表示本轮之前的历史消息。
 
@@ -250,7 +292,9 @@ image file_id
 - 如果没有上下文契约，LLM 可能把旧 assistant 文案当成当前事实。
 - 当用户输入“你好”或新话题时，LLM 可能延续上一轮问题，而不是先理解当前输入。
 
-### 4.5 active_pending_actions
+`short_term_messages` 保存最近若干轮完整 `content_json`，用于解决“可以”“好的”“帮我规划一下”这类承接和指代问题。`recent_messages` 继续保留 preview 形态，主要用于低成本调试和兼容。
+
+### 4.7 active_pending_actions
 
 来自 `agent_pending_actions`，只包含当前仍可处理的动作：
 
@@ -271,7 +315,7 @@ pending_confirmation
 
 这是“当前仍待用户处理”的权威来源。如果这里为空，就不能因为历史消息里出现“待确认”而认为当前仍有待确认动作。
 
-### 4.6 recent_records
+### 4.8 recent_records
 
 来自正式记录表：
 
@@ -314,7 +358,7 @@ pending_confirmation
 
 ## 5. 上下文压缩机制
 
-压缩由 `ConversationSummaryService.compact_if_needed` 完成。
+压缩触发由 `ConversationSummaryService.enqueue_if_needed` 完成。用户消息链路只创建 `status=pending` 的摘要任务，不同步生成摘要文本；后台 worker 后续把任务更新为 `succeeded`。
 
 当前配置：
 
@@ -328,10 +372,10 @@ CONVERSATION_SUMMARY_MAX_CHARS=2000
 
 1. 查找当前会话最新一条 `conversation_summary`。
 2. 取该摘要之后的所有消息。
-3. 如果消息数量不超过 `CONVERSATION_SUMMARY_TRIGGER_MESSAGES`，不压缩。
+3. 如果消息数量不超过 `CONVERSATION_SUMMARY_TRIGGER_MESSAGES`，不入队。
 4. 如果超过阈值，则保留最近 `CONVERSATION_CONTEXT_RECENT_MESSAGES` 条原始消息。
-5. 更早的消息用 `compose_summary` 合并成新的滚动摘要。
-6. 新摘要写入 `conversation_summaries`，后续上下文只带最新摘要和最近消息。
+5. 更早的消息范围写入 `conversation_summaries(status=pending)`。
+6. 后台 worker 生成摘要后更新为 `status=succeeded`，后续上下文只读取最新成功摘要。
 
 当前摘要格式：
 

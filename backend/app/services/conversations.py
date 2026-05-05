@@ -21,6 +21,10 @@ from app.services.conversation_context import (
     ConversationContextBuilder,
     ConversationSummaryService,
 )
+from app.services.dialogue_state import (
+    normalize_dialogue_state,
+    update_dialogue_state_after_assistant,
+)
 
 
 class ConversationService:
@@ -37,6 +41,7 @@ class ConversationService:
             user_id=user_id,
             title=payload.title,
             status="active",
+            dialogue_state_json=normalize_dialogue_state(None),
         )
         self.db.add(conversation)
         self.db.commit()
@@ -74,6 +79,7 @@ class ConversationService:
         payload: MessageCreateRequest,
     ) -> dict:
         conversation = self._get_owned_conversation(user_id, conversation_id)
+        previous_dialogue_state = normalize_dialogue_state(conversation.dialogue_state_json)
         content = [item.model_dump(mode="json", exclude_none=True) for item in payload.content]
         user_message = ConversationMessage(
             id=new_id("msg"),
@@ -96,6 +102,7 @@ class ConversationService:
             user_id=user_id,
             conversation_id=conversation.id,
             exclude_message_id=user_message.id,
+            dialogue_state=previous_dialogue_state,
         )
         context["input_normalization"] = normalized_input.context
 
@@ -116,6 +123,7 @@ class ConversationService:
         debug_context = (
             self._debug_context(extraction_input) if payload.include_debug_context else None
         )
+        assistant_created_at = utc_now()
         assistant_message = ConversationMessage(
             id=new_id("msg"),
             conversation_id=conversation.id,
@@ -125,14 +133,22 @@ class ConversationService:
             or [{"type": "text", "text": extraction_result["assistant_text"]}],
             intent=extraction_result["intent"],
             requires_review=extraction_result["requires_review"],
-            created_at=utc_now(),
+            created_at=assistant_created_at,
         )
         user_message.intent = extraction_result["intent"]
         user_message.requires_review = extraction_result["requires_review"]
         conversation.status = "active"
+        conversation.dialogue_state_json = update_dialogue_state_after_assistant(
+            previous_dialogue_state,
+            assistant_text=extraction_result["assistant_text"],
+            assistant_message_id=assistant_message.id,
+            created_at=assistant_created_at,
+            dialogue_state_patch=extraction_result.get("dialogue_state_patch"),
+        )
+        conversation.dialogue_state_updated_at = utc_now()
         self.db.add(assistant_message)
         self.db.flush()
-        self.summary_service.compact_if_needed(user_id, conversation.id)
+        self.summary_service.enqueue_if_needed(user_id, conversation.id)
         self.db.commit()
 
         response = {

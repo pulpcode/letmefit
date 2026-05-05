@@ -33,10 +33,40 @@ Page({
     actionSheetVisible: false,
     actionSheetTitle: "",
     actionSheetId: "",
+    // 胶囊按钮安全右边距（rpx），动态计算，默认留足空间
+    capsuleSafeRight: 220,
+  },
+
+  // 标记：是否是本页主动发起的 navigateTo（用于区分 onShow 是 Tab 切换还是从子页返回）
+  _justNavigatedToChat: false,
+
+  onLoad() {
+    this._calcCapsuleSafeRight();
+  },
+
+  /** 计算胶囊按钮左边缘到屏幕右侧的距离，换算为 rpx 作为 header 的 padding-right */
+  _calcCapsuleSafeRight() {
+    try {
+      const menuBtn = wx.getMenuButtonBoundingClientRect();
+      const sysInfo = wx.getSystemInfoSync();
+      const ratio = 750 / sysInfo.windowWidth; // px → rpx 换算比
+      // 从屏幕右侧到胶囊左边缘的距离，再加 16rpx 间距
+      const safeRight = Math.ceil((sysInfo.windowWidth - menuBtn.left) * ratio) + 16;
+      this.setData({ capsuleSafeRight: safeRight });
+    } catch (_) {
+      // 获取失败时保留默认值 220rpx
+    }
   },
 
   onShow() {
-    // 检测来自首页快捷入口的 prefill_mode，有则自动新建会话
+    // ── 情况1：从子页（聊天页）返回，不再自动跳转，只刷新列表 ──
+    if (this._justNavigatedToChat) {
+      this._justNavigatedToChat = false;
+      this.loadConversations();
+      return;
+    }
+
+    // ── 情况2：来自首页快捷入口的 prefill_mode，新建会话后跳转 ──
     const mode = wx.getStorageSync("letmefit.agent_prefill_mode");
     if (mode) {
       wx.removeStorageSync("letmefit.agent_prefill_mode");
@@ -47,6 +77,20 @@ Page({
       this.createAndOpenSession(placeholderMap[mode] || "");
       return;
     }
+
+    // ── 情况3：Tab 切换进来，有缓存会话则直接跳转到最近的那条 ──
+    const cached = this.data.conversations;
+    if (cached.length > 0) {
+      this._justNavigatedToChat = true;
+      wx.navigateTo({
+        url: `/pages/agent/chat/index?conversationId=${cached[0].id}&title=${encodeURIComponent(cached[0].title || "对话")}`
+      });
+      // 后台静默刷新，下次返回时列表数据是最新的
+      this.loadConversations();
+      return;
+    }
+
+    // ── 情况4：首次进入或无会话，加载列表 ──
     this.loadConversations();
   },
 
@@ -54,10 +98,10 @@ Page({
     try {
       const res = await createConversation("新对话");
       const conv = res.conversation;
+      this._justNavigatedToChat = true;
       wx.navigateTo({
         url: `/pages/agent/chat/index?conversationId=${conv.id}&title=${encodeURIComponent(conv.title || "新对话")}&placeholder=${encodeURIComponent(placeholder)}`
       });
-      // 在跳转后刷新列表（后台）
       this.loadConversations();
     } catch (error) {
       showApiError(error);
@@ -72,14 +116,12 @@ Page({
         (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
       );
 
-      // 并行加载每个会话的最后一条消息预览
       const items = await Promise.all(
         list.map(async (conv: Conversation, idx: number) => {
           let preview = "";
           try {
             const msgRes = await listMessages(conv.id);
             const msgs = msgRes.messages || [];
-            // 取最后一条消息做预览
             for (let i = msgs.length - 1; i >= 0; i--) {
               const parts = msgs[i].content || [];
               const textPart = parts.find((p: any) => p.type === "text");
@@ -112,6 +154,7 @@ Page({
 
   onOpenSession(event: any) {
     const { id, title } = event.currentTarget.dataset;
+    this._justNavigatedToChat = true;
     wx.navigateTo({
       url: `/pages/agent/chat/index?conversationId=${id}&title=${encodeURIComponent(title || "对话")}`
     });
@@ -121,6 +164,7 @@ Page({
     try {
       const res = await createConversation("新对话");
       const conv = res.conversation;
+      this._justNavigatedToChat = true;
       wx.navigateTo({
         url: `/pages/agent/chat/index?conversationId=${conv.id}&title=${encodeURIComponent(conv.title || "新对话")}`
       });
@@ -141,6 +185,7 @@ Page({
   onActionEnter() {
     const { actionSheetId, actionSheetTitle } = this.data;
     this.setData({ actionSheetVisible: false });
+    this._justNavigatedToChat = true;
     wx.navigateTo({
       url: `/pages/agent/chat/index?conversationId=${actionSheetId}&title=${encodeURIComponent(actionSheetTitle)}`
     });

@@ -9,7 +9,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 40rpx 32rpx;
+  padding: calc(32rpx + env(safe-area-inset-top)) 40rpx 32rpx;
 }
 
 .new-session-btn {
@@ -23,11 +23,6 @@
   box-shadow: 0 4rpx 12rpx rgba(6, 214, 160, 0.3);
 }
 
-.new-icon {
-  font-size: 34rpx;
-  color: #ffffff;
-  line-height: 1;
-}
 
 /* ========== 加载态 ========== */
 .sessions-loading {

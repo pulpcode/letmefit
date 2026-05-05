@@ -52,6 +52,7 @@ The model must return one JSON object:
   "requires_review": true,
   "confidence": 0.82,
   "warnings": [],
+  "dialogue_state_patch": null,
   "pending_actions": []
 }
 ```
@@ -63,7 +64,36 @@ Fields:
 - `requires_review`: model-side hint; backend makes the final confirmation decision
 - `confidence`: 0-1 model confidence
 - `warnings`: low-confidence or missing-field warnings
+- `dialogue_state_patch`: optional one-turn dialogue-state hint; does not write formal facts
 - `pending_actions`: candidate write actions; backend may auto-commit clear actions or create pending actions
+
+## Dialogue State Patch
+
+When the assistant response creates a proposal that the next user turn may accept or continue, the model may return:
+
+```json
+{
+  "dialogue_state_patch": {
+    "new_active_offer": {
+      "kind": "assistant_offer",
+      "surface_text": "需要我帮您规划一份适合的晚餐方案吗？",
+      "referent": {
+        "topic": "晚餐方案",
+        "user_goal": "基于今日记录和减脂目标安排晚餐",
+        "expected_followup": "用户同意时直接生成晚餐方案"
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- `new_active_offer.kind` must be `assistant_offer`.
+- `surface_text` must come from the current `assistant_text`.
+- `referent` may only describe `topic`, `user_goal`, and `expected_followup`.
+- It must not contain profile, records, pending actions, draft payloads, or formal facts.
+- The backend treats it as a one-user-turn token and clears it after the next user message.
 
 ## Pending Action Types
 

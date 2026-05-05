@@ -44,9 +44,13 @@ class Settings(BaseSettings):
     ai_max_retries: int = 2
     ai_schema_repair_retries: int = 1
     ai_temperature: float = 0.1
+    conversation_context_short_term_full_turns: int = 4
     conversation_context_recent_messages: int = 8
     conversation_summary_trigger_messages: int = 16
     conversation_summary_max_chars: int = 2000
+    conversation_summary_worker_limit: int = 10
+    conversation_summary_worker_interval_seconds: float = 5.0
+    conversation_summary_running_timeout_seconds: int = 600
     asr_provider: str = "mock"
     vision_provider: str = "mock"
     dashscope_asr_endpoint: str = (

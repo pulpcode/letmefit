@@ -218,6 +218,7 @@ class ExtractionService:
             "requires_review": bool(pending_actions),
             "pending_actions": pending_response,
             "committed_records": committed_records,
+            "dialogue_state_patch": provider_result.dialogue_state_patch,
         }
 
     def _pending_response(self, action: AgentPendingAction) -> dict:

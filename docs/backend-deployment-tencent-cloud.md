@@ -113,6 +113,14 @@ MEDIA_PUBLIC_BASE_URL=https://www.letmefit.cloud
 MEDIA_MAX_UPLOAD_BYTES=10485760
 ```
 
+摘要 worker 默认配置：
+
+```env
+CONVERSATION_SUMMARY_WORKER_LIMIT=10
+CONVERSATION_SUMMARY_WORKER_INTERVAL_SECONDS=5
+CONVERSATION_SUMMARY_RUNNING_TIMEOUT_SECONDS=600
+```
+
 ## 6. MySQL And Redis
 
 ```bash
@@ -150,16 +158,22 @@ curl http://127.0.0.1:8000/v1/health
 ```bash
 sudo cp /opt/letmefit/backend/deploy/systemd/letmefit-backend.service.example \
   /etc/systemd/system/letmefit-backend.service
+sudo cp /opt/letmefit/backend/deploy/systemd/letmefit-summary-worker.service.example \
+  /etc/systemd/system/letmefit-summary-worker.service
 sudo systemctl daemon-reload
 sudo systemctl enable letmefit-backend
+sudo systemctl enable letmefit-summary-worker
 sudo systemctl start letmefit-backend
+sudo systemctl start letmefit-summary-worker
 sudo systemctl status letmefit-backend
+sudo systemctl status letmefit-summary-worker
 ```
 
 查看日志：
 
 ```bash
 sudo journalctl -u letmefit-backend -f
+sudo journalctl -u letmefit-summary-worker -f
 ```
 
 ## 9. SSL Certificate
@@ -216,6 +230,7 @@ cd /opt/letmefit/backend
 sudo -u letmefit uv sync --frozen --no-dev
 sudo -u letmefit uv run alembic upgrade head
 sudo systemctl restart letmefit-backend
+sudo systemctl restart letmefit-summary-worker
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -225,5 +240,6 @@ sudo systemctl reload nginx
 - `.env.production` must not be committed.
 - Keep MySQL and Redis ports bound to `127.0.0.1`.
 - Keep FastAPI bound to `127.0.0.1:8000`; public traffic enters through Nginx.
+- Run `letmefit-summary-worker` as a separate systemd service; it handles SIGTERM gracefully and finishes the current claimed summary job before exit.
 - Back up Docker volumes before destructive operations.
 - Public beta should add database backup, log rotation, and certificate renewal reminders.

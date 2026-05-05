@@ -159,6 +159,8 @@ Agent 会话。
 | `user_id` | `VARCHAR(40)` FK | 用户 |
 | `title` | `VARCHAR(128)` NULL | 会话标题 |
 | `status` | `VARCHAR(32)` | `active` / `archived` |
+| `dialogue_state_json` | `JSON` NULL | 会话级短期对话状态，如一次性 `active_offer` |
+| `dialogue_state_updated_at` | `DATETIME(6)` NULL | 对话状态更新时间 |
 | `created_at` | `DATETIME(6)` | 创建时间 |
 | `updated_at` | `DATETIME(6)` | 更新时间 |
 
@@ -212,13 +214,19 @@ Agent 会话。
 | `user_id` | `VARCHAR(40)` FK | 用户 |
 | `from_message_id` | `VARCHAR(40)` FK | 摘要起始消息 |
 | `to_message_id` | `VARCHAR(40)` FK | 摘要结束消息 |
+| `summary_type` | `VARCHAR(32)` | `rolling` |
+| `status` | `VARCHAR(32)` | `pending` / `running` / `succeeded` / `failed` |
 | `summary_text` | `TEXT` | 摘要内容 |
+| `summary_json` | `JSON` NULL | 结构化摘要预留字段 |
 | `token_estimate` | `INT` NULL | 估算 token 数 |
+| `model_name` | `VARCHAR(128)` NULL | 生成摘要的模型 |
 | `created_at` | `DATETIME(6)` | 创建时间 |
+| `updated_at` | `DATETIME(6)` NULL | 更新时间 |
 
 索引：
 
 - `ix_conversation_summaries_conversation_created`
+- `ix_conversation_summaries_conversation_status_created`
 
 ## 4. AI 提取与待确认动作
 

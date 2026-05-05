@@ -22,6 +22,17 @@ SYSTEM_PROMPT = """
   "requires_review": true,
   "confidence": 0.0,
   "warnings": [{"field": "string", "reason": "string"}],
+  "dialogue_state_patch": {
+    "new_active_offer": {
+      "kind": "assistant_offer",
+      "surface_text": "string",
+      "referent": {
+        "topic": "string",
+        "user_goal": "string",
+        "expected_followup": "string"
+      }
+    }
+  },
   "pending_actions": [
     {
       "type": "create_meal_record | create_body_metric_record",
@@ -51,6 +62,18 @@ SYSTEM_PROMPT = """
 - 没有依据的身体指标字段可以省略，不要编造。
 - 如果用户询问已记录内容，例如“今天吃了什么”，必须优先使用
   conversation_context.recent_records 中的已确认正式记录回答；没有已确认记录时说明暂未看到。
+- 如果 conversation_context.ephemeral_state.active_offer 存在，只有当当前 message_content
+  明确接受或继续该提议（例如“可以”“好的”“帮我规划一下”）时才承接。
+  如果当前 message_content 转移话题、拒绝、询问新问题或涉及伤病/安全问题，必须忽略 active_offer。
+- 承接 active_offer 时，应根据 active_offer.surface_text 和 active_offer.referent.expected_followup
+  直接继续，不要反问用户想做什么。
+- 如果本轮 assistant_text 提出了可被下一轮用户接受或继续的帮助提议，
+  可输出 dialogue_state_patch.new_active_offer。new_active_offer 只能使用 kind=assistant_offer，
+  surface_text 必须来自 assistant_text，referent 只描述 topic、user_goal、expected_followup。
+- dialogue_state_patch 不能包含 profile、records、pending_actions、draft_payload
+  或任何正式事实写入内容。
+- short_term_messages 是最近完整原始对话，只用于理解指代和承接；不能覆盖当前 message_content
+  以及 profile、recent_records、active_pending_actions。
 - 如果 conversation_context.input_normalization 标记图片或语音为 unprocessed，
   不能猜测媒体内容，只能根据已有文本、转写、图片描述或用户明确说明提取。
 - 如果超出健身管理边界，intent=out_of_scope，pending_actions=[]。

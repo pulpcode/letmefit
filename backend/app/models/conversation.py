@@ -15,6 +15,8 @@ class Conversation(TimestampMixin, Base):
     user_id: Mapped[str] = mapped_column(String(40), ForeignKey("users.id"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    dialogue_state_json: Mapped[Any | None] = mapped_column(json_type)
+    dialogue_state_updated_at: Mapped[Any | None] = utc_datetime()
 
 
 class ConversationMessage(Base):
@@ -81,6 +83,11 @@ class ConversationSummary(Base):
         ForeignKey("conversation_messages.id"),
         nullable=False,
     )
+    summary_type: Mapped[str] = mapped_column(String(32), nullable=False, default="rolling")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="succeeded")
     summary_text: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_json: Mapped[Any | None] = mapped_column(json_type)
     token_estimate: Mapped[int | None] = mapped_column(Integer)
+    model_name: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[Any] = utc_datetime(nullable=False)
+    updated_at: Mapped[Any | None] = utc_datetime()

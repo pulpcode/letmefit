@@ -43,9 +43,13 @@ The backend builds model context dynamically before extraction. It includes the 
 CONVERSATION_CONTEXT_RECENT_MESSAGES=8
 CONVERSATION_SUMMARY_TRIGGER_MESSAGES=16
 CONVERSATION_SUMMARY_MAX_CHARS=2000
+CONVERSATION_SUMMARY_WORKER_LIMIT=10
+CONVERSATION_SUMMARY_WORKER_INTERVAL_SECONDS=5
+CONVERSATION_SUMMARY_RUNNING_TIMEOUT_SECONDS=600
 ```
 
 Older messages are compressed into `conversation_summaries`; summaries are context only and are not treated as formal records.
+Run `scripts/process_conversation_summaries.py --loop` as a separate worker in server deployments.
 
 ## Multimodal Input
 

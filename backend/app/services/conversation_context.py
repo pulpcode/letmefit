@@ -1,7 +1,8 @@
 from collections import defaultdict
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.auth.security import new_id, utc_now
@@ -9,16 +10,24 @@ from app.core.config import Settings, get_settings
 from app.models import (
     AgentPendingAction,
     BodyMetricRecord,
+    Conversation,
     ConversationMessage,
     ConversationSummary,
     MealItem,
     MealRecord,
     UserProfile,
 )
+from app.services.dialogue_state import dialogue_state_context
 
 ACTIVE_PENDING_ACTION_STATUSES = {"needs_clarification", "pending_confirmation"}
+ACTIVE_SUMMARY_JOB_STATUSES = {"pending", "running"}
+PENDING_SUMMARY_JOB_STATUS = "pending"
+RUNNING_SUMMARY_JOB_STATUS = "running"
+SUCCEEDED_SUMMARY_STATUS = "succeeded"
+FAILED_SUMMARY_STATUS = "failed"
 CONTEXT_RECORD_LIMIT = 5
 CONTEXT_PENDING_ACTION_LIMIT = 10
+LOCAL_SUMMARY_MODEL_NAME = "local_compose_summary_v1"
 
 
 class ConversationContextBuilder:
@@ -31,6 +40,7 @@ class ConversationContextBuilder:
         user_id: str,
         conversation_id: str,
         exclude_message_id: str | None = None,
+        dialogue_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         latest_summary = self.latest_summary(user_id, conversation_id)
         messages = self._conversation_messages(user_id, conversation_id)
@@ -39,15 +49,38 @@ class ConversationContextBuilder:
             latest_summary=latest_summary,
             exclude_message_id=exclude_message_id,
         )
+        short_term_messages = self._short_term_messages_after_summary(
+            messages=messages,
+            latest_summary=latest_summary,
+            exclude_message_id=exclude_message_id,
+        )
+        state = (
+            dialogue_state
+            if dialogue_state is not None
+            else self._conversation_state(user_id, conversation_id)
+        )
+        state_context = dialogue_state_context(state)
 
         return {
+            "memory_policy": {
+                "summary_mode": "async_rolling",
+                "short_term_full_turns": self.settings.conversation_context_short_term_full_turns,
+                "short_term_message_limit": self._short_term_message_limit(),
+                "recent_preview_message_limit": self.settings.conversation_context_recent_messages,
+            },
             "policy": {
                 "summary_mode": "rolling",
                 "recent_message_limit": self.settings.conversation_context_recent_messages,
             },
+            "ephemeral_state": state_context["ephemeral_state"],
+            "durable_context": state_context["durable_context"],
             "profile": self._profile_context(user_id),
+            "latest_conversation_summary": self._summary_context(latest_summary),
             "conversation_summary": self._summary_context(latest_summary),
             "recent_messages": [self._message_context(message) for message in recent_messages],
+            "short_term_messages": [
+                self._full_message_context(message) for message in short_term_messages
+            ],
             "active_pending_actions": self._pending_action_context(user_id, conversation_id),
             "recent_records": self._recent_records_context(user_id),
         }
@@ -62,10 +95,20 @@ class ConversationContextBuilder:
             .where(
                 ConversationSummary.user_id == user_id,
                 ConversationSummary.conversation_id == conversation_id,
+                ConversationSummary.status == SUCCEEDED_SUMMARY_STATUS,
             )
             .order_by(ConversationSummary.created_at.desc())
             .limit(1)
         )
+
+    def _conversation_state(self, user_id: str, conversation_id: str) -> dict[str, Any] | None:
+        conversation = self.db.scalar(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+            )
+        )
+        return conversation.dialogue_state_json if conversation else None
 
     def _conversation_messages(
         self,
@@ -95,6 +138,21 @@ class ConversationContextBuilder:
         ]
         recent_limit = max(1, self.settings.conversation_context_recent_messages)
         return filtered_messages[-recent_limit:]
+
+    def _short_term_messages_after_summary(
+        self,
+        messages: list[ConversationMessage],
+        latest_summary: ConversationSummary | None,
+        exclude_message_id: str | None,
+    ) -> list[ConversationMessage]:
+        messages_after_summary = self._messages_after_summary(messages, latest_summary)
+        filtered_messages = [
+            message for message in messages_after_summary if message.id != exclude_message_id
+        ]
+        return filtered_messages[-self._short_term_message_limit() :]
+
+    def _short_term_message_limit(self) -> int:
+        return max(1, self.settings.conversation_context_short_term_full_turns) * 2
 
     def _messages_after_summary(
         self,
@@ -130,15 +188,32 @@ class ConversationContextBuilder:
             "id": summary.id,
             "from_message_id": summary.from_message_id,
             "to_message_id": summary.to_message_id,
+            "summary_type": summary.summary_type,
+            "status": summary.status,
             "summary_text": summary.summary_text,
+            "summary_json": summary.summary_json,
             "token_estimate": summary.token_estimate,
+            "model_name": summary.model_name,
             "created_at": _iso_or_none(summary.created_at),
+            "updated_at": _iso_or_none(summary.updated_at),
         }
 
     def _message_context(self, message: ConversationMessage) -> dict[str, Any]:
         return {
             "id": message.id,
             "role": message.role,
+            "content_preview": content_preview(message.content_json),
+            "content_types": content_types(message.content_json),
+            "intent": message.intent,
+            "requires_review": message.requires_review,
+            "created_at": _iso_or_none(message.created_at),
+        }
+
+    def _full_message_context(self, message: ConversationMessage) -> dict[str, Any]:
+        return {
+            "id": message.id,
+            "role": message.role,
+            "content": message.content_json,
             "content_preview": content_preview(message.content_json),
             "content_types": content_types(message.content_json),
             "intent": message.intent,
@@ -310,13 +385,233 @@ class ConversationSummaryService:
                 latest_summary.from_message_id if latest_summary else messages_to_summarize[0].id
             ),
             to_message_id=messages_to_summarize[-1].id,
+            summary_type="rolling",
+            status=SUCCEEDED_SUMMARY_STATUS,
             summary_text=summary_text,
+            summary_json=None,
             token_estimate=estimate_tokens(summary_text),
+            model_name=None,
             created_at=utc_now(),
+            updated_at=utc_now(),
         )
         self.db.add(summary)
         self.db.flush()
         return summary
+
+    def enqueue_if_needed(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> ConversationSummary | None:
+        latest_summary = self.context_builder.latest_summary(user_id, conversation_id)
+        messages = self.context_builder._conversation_messages(user_id, conversation_id)
+        messages_after_summary = self.context_builder._messages_after_summary(
+            messages,
+            latest_summary,
+        )
+
+        trigger_count = max(1, self.settings.conversation_summary_trigger_messages)
+        if len(messages_after_summary) <= trigger_count:
+            return None
+
+        recent_limit = self.context_builder._short_term_message_limit()
+        messages_to_summarize = messages_after_summary[:-recent_limit]
+        if not messages_to_summarize:
+            return None
+
+        existing_job = self._active_summary_job(user_id, conversation_id)
+        if existing_job:
+            return existing_job
+
+        now = utc_now()
+        job = ConversationSummary(
+            id=new_id("conv_sum"),
+            conversation_id=conversation_id,
+            user_id=user_id,
+            from_message_id=(
+                latest_summary.from_message_id if latest_summary else messages_to_summarize[0].id
+            ),
+            to_message_id=messages_to_summarize[-1].id,
+            summary_type="rolling",
+            status=PENDING_SUMMARY_JOB_STATUS,
+            summary_text="",
+            summary_json=None,
+            token_estimate=None,
+            model_name=None,
+            created_at=now,
+            updated_at=now,
+        )
+        self.db.add(job)
+        self.db.flush()
+        return job
+
+    def _active_summary_job(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> ConversationSummary | None:
+        return self.db.scalar(
+            select(ConversationSummary)
+            .where(
+                ConversationSummary.user_id == user_id,
+                ConversationSummary.conversation_id == conversation_id,
+                ConversationSummary.status.in_(ACTIVE_SUMMARY_JOB_STATUSES),
+            )
+            .order_by(ConversationSummary.created_at.desc())
+            .limit(1)
+        )
+
+    def pending_jobs(self, limit: int = 10) -> list[ConversationSummary]:
+        job_ids = self.pending_job_ids(limit=limit)
+        if not job_ids:
+            return []
+        return list(
+            self.db.scalars(
+                select(ConversationSummary)
+                .where(ConversationSummary.id.in_(job_ids))
+                .order_by(ConversationSummary.created_at.asc())
+            )
+        )
+
+    def pending_job_ids(self, limit: int = 10) -> list[str]:
+        job_limit = max(1, limit)
+        return list(
+            self.db.scalars(
+                select(ConversationSummary.id)
+                .where(ConversationSummary.status == PENDING_SUMMARY_JOB_STATUS)
+                .order_by(ConversationSummary.created_at.asc())
+                .limit(job_limit)
+            )
+        )
+
+    def process_pending_jobs(self, limit: int = 10, commit: bool = True) -> dict[str, int]:
+        stats = {"processed": 0, "claimed": 0, "succeeded": 0, "failed": 0, "recovered": 0}
+        stats["recovered"] = self.recover_stale_running_jobs()
+        if commit and stats["recovered"]:
+            self.db.commit()
+
+        for job_id in self.pending_job_ids(limit=limit):
+            job = self.claim_pending_job(job_id)
+            if not job:
+                continue
+            stats["processed"] += 1
+            stats["claimed"] += 1
+            if commit:
+                self.db.commit()
+            if self.process_job(job):
+                stats["succeeded"] += 1
+            else:
+                stats["failed"] += 1
+            if commit:
+                self.db.commit()
+        return stats
+
+    def claim_pending_job(self, job_id: str) -> ConversationSummary | None:
+        now = utc_now()
+        result = self.db.execute(
+            update(ConversationSummary)
+            .where(
+                ConversationSummary.id == job_id,
+                ConversationSummary.status == PENDING_SUMMARY_JOB_STATUS,
+            )
+            .values(status=RUNNING_SUMMARY_JOB_STATUS, updated_at=now)
+        )
+        self.db.flush()
+        if (result.rowcount or 0) != 1:
+            return None
+        return self.db.scalar(select(ConversationSummary).where(ConversationSummary.id == job_id))
+
+    def recover_stale_running_jobs(self) -> int:
+        timeout = max(1, self.settings.conversation_summary_running_timeout_seconds)
+        cutoff = utc_now() - timedelta(seconds=timeout)
+        now = utc_now()
+        result = self.db.execute(
+            update(ConversationSummary)
+            .where(
+                ConversationSummary.status == RUNNING_SUMMARY_JOB_STATUS,
+                ConversationSummary.updated_at < cutoff,
+            )
+            .values(
+                status=PENDING_SUMMARY_JOB_STATUS,
+                summary_json={"recovered_from": "running", "reason": "running_timeout"},
+                updated_at=now,
+            )
+        )
+        self.db.flush()
+        return result.rowcount or 0
+
+    def process_job(self, job: ConversationSummary) -> bool:
+        if job.status != PENDING_SUMMARY_JOB_STATUS:
+            if job.status != RUNNING_SUMMARY_JOB_STATUS:
+                return False
+        else:
+            job.status = RUNNING_SUMMARY_JOB_STATUS
+            job.updated_at = utc_now()
+            self.db.flush()
+
+
+        previous_summary = self._previous_succeeded_summary(job)
+        messages = self._messages_for_summary_job(job)
+        if not messages:
+            self._fail_job(job, "summary_job_messages_not_found")
+            return False
+
+        summary_text = self.compose_summary(
+            previous_summary_text=previous_summary.summary_text if previous_summary else None,
+            messages=messages,
+            max_chars=self.settings.conversation_summary_max_chars,
+        )
+        job.status = SUCCEEDED_SUMMARY_STATUS
+        job.summary_text = summary_text
+        job.summary_json = {
+            "message_count": len(messages),
+            "from_message_id": job.from_message_id,
+            "to_message_id": job.to_message_id,
+            "method": LOCAL_SUMMARY_MODEL_NAME,
+        }
+        job.token_estimate = estimate_tokens(summary_text)
+        job.model_name = LOCAL_SUMMARY_MODEL_NAME
+        job.updated_at = utc_now()
+        self.db.flush()
+        return True
+
+    def _fail_job(self, job: ConversationSummary, reason: str) -> None:
+        job.status = FAILED_SUMMARY_STATUS
+        job.summary_json = {"error": reason}
+        job.updated_at = utc_now()
+        self.db.flush()
+
+    def _previous_succeeded_summary(
+        self,
+        job: ConversationSummary,
+    ) -> ConversationSummary | None:
+        return self.db.scalar(
+            select(ConversationSummary)
+            .where(
+                ConversationSummary.user_id == job.user_id,
+                ConversationSummary.conversation_id == job.conversation_id,
+                ConversationSummary.status == SUCCEEDED_SUMMARY_STATUS,
+                ConversationSummary.created_at < job.created_at,
+            )
+            .order_by(ConversationSummary.created_at.desc())
+            .limit(1)
+        )
+
+    def _messages_for_summary_job(
+        self,
+        job: ConversationSummary,
+    ) -> list[ConversationMessage]:
+        messages = self.context_builder._conversation_messages(job.user_id, job.conversation_id)
+        from_index = None
+        to_index = None
+        for index, message in enumerate(messages):
+            if message.id == job.from_message_id:
+                from_index = index
+            if message.id == job.to_message_id:
+                to_index = index
+        if from_index is None or to_index is None or to_index < from_index:
+            return []
+        return messages[from_index : to_index + 1]
 
     def compose_summary(
         self,

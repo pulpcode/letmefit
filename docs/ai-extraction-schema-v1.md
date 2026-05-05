@@ -66,6 +66,7 @@ Fields:
 - `warnings`: low-confidence or missing-field warnings
 - `dialogue_state_patch`: optional one-turn dialogue-state hint; does not write formal facts
 - `pending_actions`: candidate write actions; backend may auto-commit clear actions or create pending actions
+- `pending_actions[].grounding`: required evidence metadata for every candidate write action
 
 ## Dialogue State Patch
 
@@ -110,6 +111,31 @@ Planned but not yet committed through LLM:
 generate_daily_summary
 ```
 
+## Pending Action Grounding
+
+Every pending action must include:
+
+```json
+{
+  "grounding": {
+    "source": "user_current_turn",
+    "evidence_text": "我晚餐吃了120g鸡胸肉"
+  }
+}
+```
+
+Allowed values:
+
+- `user_current_turn`: the action is grounded in the current user message.
+- `assistant_generated`: the action content came from assistant planning, recommendation, example, or estimation.
+
+Rules:
+
+- `evidence_text` must be an exact substring from the current user message.
+- The backend only accepts `source=user_current_turn` actions whose `evidence_text` is present in the current user message.
+- `assistant_generated` actions are discarded by the backend and must not create confirmation cards.
+- Planning, recommendation, and advice responses must use `pending_actions=[]`.
+
 ## Meal Record Draft
 
 ```json
@@ -134,6 +160,10 @@ generate_daily_summary
       }
     ],
     "confidence": 0.78
+  },
+  "grounding": {
+    "source": "user_current_turn",
+    "evidence_text": "我午餐吃了约120g鸡胸肉"
   },
   "warnings": []
 }
@@ -163,6 +193,10 @@ Rules:
     "body_fat_percentage": 18.6,
     "bmi": 23.1,
     "confidence": 0.82
+  },
+  "grounding": {
+    "source": "user_current_turn",
+    "evidence_text": "今天体重72.4kg，体脂18.6%"
   },
   "warnings": []
 }

@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 from typing import Any
 
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.ai.commit_rules import decide_auto_commit
 from app.ai.draft_normalizer import normalize_pending_action_draft
 from app.ai.providers import ExtractionProvider, get_extraction_provider
-from app.ai.types import ExtractionInput, ExtractionProviderResult
+from app.ai.types import ExtractionActionSpec, ExtractionInput, ExtractionProviderResult
 from app.auth.security import new_id, utc_now
 from app.core.config import Settings, get_settings
 from app.models import AgentExtraction, AgentPendingAction
@@ -16,6 +17,8 @@ from app.schemas.pending_action import decimal_to_float
 from app.schemas.records import BodyMetricCreateRequest, MealCreateRequest
 from app.services.body_metrics import BodyMetricService
 from app.services.meals import MealService
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractionService:
@@ -46,7 +49,13 @@ class ExtractionService:
                 context=context or {},
             )
         )
-        if not provider_result.action_specs:
+        action_specs = self._filter_action_specs(
+            provider_result.action_specs,
+            content=content,
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+        if not action_specs:
             return self._result_response(provider_result, [], [])
 
         extraction = AgentExtraction(
@@ -69,7 +78,7 @@ class ExtractionService:
         pending_actions = []
         committed_records = []
         input_text = self._joined_text(content)
-        for action_spec in provider_result.action_specs:
+        for action_spec in action_specs:
             draft_payload = normalize_pending_action_draft(
                 action_spec.action_type,
                 action_spec.draft_payload,
@@ -135,6 +144,64 @@ class ExtractionService:
             )
         extraction.requires_confirmation = bool(pending_actions)
         return self._result_response(provider_result, pending_actions, committed_records)
+
+    def _filter_action_specs(
+        self,
+        action_specs: list[ExtractionActionSpec],
+        content: list[MessageContentItem],
+        conversation_id: str,
+        message_id: str,
+    ) -> list[ExtractionActionSpec]:
+        if not action_specs:
+            return []
+
+        input_text = self._joined_text(content)
+        kept = []
+        for action_spec in action_specs:
+            drop_reason = self._action_drop_reason(action_spec, input_text)
+            if drop_reason:
+                self._log_dropped_action(
+                    action_spec=action_spec,
+                    reason=drop_reason,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                )
+                continue
+            kept.append(action_spec)
+        return kept
+
+    def _action_drop_reason(
+        self,
+        action_spec: ExtractionActionSpec,
+        input_text: str,
+    ) -> str | None:
+        grounding = action_spec.grounding
+        if grounding is None:
+            return "grounding_missing"
+        if grounding.source != "user_current_turn":
+            return f"source={grounding.source}"
+
+        evidence_text = grounding.evidence_text.strip()
+        if not evidence_text:
+            return "evidence_text_empty"
+        if evidence_text not in input_text:
+            return "evidence_not_in_user_message"
+        return None
+
+    def _log_dropped_action(
+        self,
+        action_spec: ExtractionActionSpec,
+        reason: str,
+        conversation_id: str,
+        message_id: str,
+    ) -> None:
+        logger.info(
+            "action_guard_dropped action_type=%s reason=%s conversation_id=%s message_id=%s",
+            action_spec.action_type,
+            reason,
+            conversation_id,
+            message_id,
+        )
 
     def _create_pending_action(
         self,

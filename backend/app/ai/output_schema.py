@@ -3,7 +3,13 @@ from typing import Any, Literal, Self
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from app.ai.types import ExtractionActionSpec, ExtractionProviderResult, Intent
+from app.ai.types import (
+    ActionGrounding,
+    ExtractionActionSpec,
+    ExtractionProviderResult,
+    GroundingSource,
+    Intent,
+)
 
 ActionType = Literal["create_meal_record", "create_body_metric_record"]
 
@@ -15,6 +21,19 @@ class ExtractionWarningOutput(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class PendingActionGroundingOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    source: GroundingSource
+    evidence_text: str = Field(default="", max_length=4000)
+
+    def to_grounding(self) -> ActionGrounding:
+        return ActionGrounding(
+            source=self.source,
+            evidence_text=self.evidence_text,
+        )
+
+
 class PendingActionOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -24,6 +43,7 @@ class PendingActionOutput(BaseModel):
     )
     confidence: Decimal | None = Field(default=None, ge=0, le=1)
     draft_payload: dict[str, Any]
+    grounding: PendingActionGroundingOutput | None = None
     warnings: list[ExtractionWarningOutput] = Field(default_factory=list)
 
     def to_action_spec(self) -> ExtractionActionSpec:
@@ -31,6 +51,7 @@ class PendingActionOutput(BaseModel):
             action_type=self.action_type,
             confidence=self.confidence,
             draft_payload=self.draft_payload,
+            grounding=self.grounding.to_grounding() if self.grounding else None,
             warnings=[
                 item.model_dump(mode="json", exclude_none=True)
                 for item in self.warnings

@@ -5,6 +5,7 @@ from typing import Any, Literal
 from app.schemas.conversation import MessageContentItem
 
 Intent = Literal["fitness_record", "answer_fitness_question", "out_of_scope"]
+GroundingSource = Literal["user_current_turn", "assistant_generated"]
 
 
 @dataclass(frozen=True)
@@ -17,10 +18,17 @@ class ExtractionInput:
 
 
 @dataclass(frozen=True)
+class ActionGrounding:
+    source: GroundingSource
+    evidence_text: str
+
+
+@dataclass(frozen=True)
 class ExtractionActionSpec:
     action_type: str
     confidence: Decimal | None
     draft_payload: dict[str, Any]
+    grounding: ActionGrounding | None = None
     warnings: list[dict[str, Any]] = field(default_factory=list)
 
 

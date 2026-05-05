@@ -38,6 +38,10 @@ SYSTEM_PROMPT = """
       "type": "create_meal_record | create_body_metric_record",
       "confidence": 0.0,
       "draft_payload": {},
+      "grounding": {
+        "source": "user_current_turn | assistant_generated",
+        "evidence_text": "string"
+      },
       "warnings": [{"field": "string", "reason": "string"}]
     }
   ]
@@ -45,8 +49,17 @@ SYSTEM_PROMPT = """
 
 规则:
 - pending_actions 字段表示候选写入动作；后端会根据规则决定自动保存或要求用户确认。
+- 每个 pending_action 必须包含 grounding 字段。
+- grounding.source 只能是 user_current_turn 或 assistant_generated。
+- grounding.evidence_text 必须是当前用户消息 message_content 中的原文直接摘录，不能改写。
+- 如果 action 内容来自助手自己的规划、推荐、建议、估算或示例，grounding.source 必须是 assistant_generated。
+- assistant_generated 不能作为写入记录或确认卡依据；这类场景必须 pending_actions=[]。
+- 如果 assistant_text 在帮用户规划、推荐、建议餐食，或询问“是否需要记录”，pending_actions 必须为空。
+- 只有用户当前消息明确陈述已经吃了、喝了、体重/体脂数值，或明确要求记录当前消息中的事实时，
+  才能输出 source=user_current_turn 的 pending_action。
+- 后端会校验 evidence_text 是否真实存在于当前用户消息中；校验失败的 action 会被丢弃。
 - 模型不能声称已经保存记录，不能直接确认记录。
-- 当输入明确、字段完整且置信度高时，仍输出候选动作；后端可能自动保存。
+- 当用户当前消息中的事实输入明确、字段完整且置信度高时，仍输出候选动作；后端可能自动保存。
 - 当图像识别、媒体未处理、用户描述模糊、字段不完整或低置信度时，
   requires_review=true，并把低置信度字段放入 warnings。
 - create_meal_record.draft_payload 必须尽量包含 recorded_at、source_type、meal_type、items。

@@ -75,6 +75,10 @@ def _body_metric_content() -> str:
                         "source_type": "text",
                         "weight_kg": 72.4,
                     },
+                    "grounding": {
+                        "source": "user_current_turn",
+                        "evidence_text": "今天体重72.4公斤",
+                    },
                     "warnings": [],
                 }
             ],
@@ -155,6 +159,8 @@ def test_bailian_provider_parses_json_mode_response() -> None:
     assert result.intent == "fitness_record"
     assert result.confidence is not None
     assert result.action_specs[0].action_type == "create_body_metric_record"
+    assert result.action_specs[0].grounding is not None
+    assert result.action_specs[0].grounding.source == "user_current_turn"
     assert result.action_specs[0].draft_payload["weight_kg"] == 72.4
     call = client.completions.calls[0]
     assert call["model"] == "qwen-plus"
@@ -218,6 +224,12 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     assert "active_offer 在本轮结束后会失效" in "".join(
         prompt_json["context_contract"]["rules"]
     )
+    assert "pending_actions 必须带 grounding" in "".join(
+        prompt_json["context_contract"]["rules"]
+    )
+    system_prompt = client.completions.calls[0]["messages"][0]["content"]
+    assert "每个 pending_action 必须包含 grounding 字段" in system_prompt
+    assert "assistant_generated 不能作为写入记录或确认卡依据" in system_prompt
     assert "dialogue_state_patch 不能包含 profile" in "".join(
         prompt_json["context_contract"]["rules"]
     )

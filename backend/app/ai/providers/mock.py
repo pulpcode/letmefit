@@ -4,7 +4,12 @@ from decimal import Decimal
 from typing import Any
 
 from app.ai.providers.base import ExtractionProvider
-from app.ai.types import ExtractionActionSpec, ExtractionInput, ExtractionProviderResult
+from app.ai.types import (
+    ActionGrounding,
+    ExtractionActionSpec,
+    ExtractionInput,
+    ExtractionProviderResult,
+)
 from app.core.config import Settings, get_settings
 from app.schemas.conversation import MessageContentItem
 
@@ -61,14 +66,19 @@ class MockExtractionProvider(ExtractionProvider):
         has_image = any(item.type == "image" for item in content)
         meal_keywords = ("早餐", "午餐", "晚餐", "加餐", "吃", "餐", "meal", "lunch", "dinner")
         if has_image or any(keyword in lowered for keyword in meal_keywords):
-            specs.append(self._meal_spec(lowered, has_image))
+            specs.append(self._meal_spec(lowered, has_image, text))
 
         body_keywords = ("体重", "体脂", "bmi", "weight", "公斤", "kg", "斤")
         if any(keyword in lowered for keyword in body_keywords):
-            specs.append(self._body_metric_spec(lowered))
+            specs.append(self._body_metric_spec(lowered, text))
         return specs
 
-    def _meal_spec(self, text: str, has_image: bool) -> ExtractionActionSpec:
+    def _meal_spec(
+        self,
+        text: str,
+        has_image: bool,
+        evidence_text: str,
+    ) -> ExtractionActionSpec:
         meal_type = "unknown"
         if "早餐" in text or "breakfast" in text:
             meal_type = "breakfast"
@@ -109,10 +119,11 @@ class MockExtractionProvider(ExtractionProvider):
                 "items": items,
                 "confidence": float(confidence),
             },
+            grounding=self._grounding(evidence_text),
             warnings=warnings,
         )
 
-    def _body_metric_spec(self, text: str) -> ExtractionActionSpec:
+    def _body_metric_spec(self, text: str, evidence_text: str) -> ExtractionActionSpec:
         weight_kg = self._extract_weight_kg(text)
         confidence = Decimal("0.90") if weight_kg is not None else Decimal("0.35")
         draft_payload: dict[str, Any] = {
@@ -130,8 +141,14 @@ class MockExtractionProvider(ExtractionProvider):
             action_type="create_body_metric_record",
             confidence=confidence,
             draft_payload=draft_payload,
+            grounding=self._grounding(evidence_text),
             warnings=warnings,
         )
+
+    def _grounding(self, evidence_text: str) -> ActionGrounding | None:
+        if not evidence_text.strip():
+            return None
+        return ActionGrounding(source="user_current_turn", evidence_text=evidence_text)
 
     def _extract_gram_items(self, text: str) -> list[dict[str, Any]]:
         items = []

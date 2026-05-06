@@ -1,4 +1,5 @@
 import logging
+from copy import deepcopy
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -55,18 +56,67 @@ class PendingActionService:
         user_id: str,
         pending_action_id: str,
         payload: PendingActionUpdateRequest,
+        commit: bool = True,
     ) -> dict:
         action = self._get_owned_action(user_id, pending_action_id, lock=True)
         self._ensure_editable(action)
-        draft_payload = dict(action.draft_payload_json)
+        draft_payload = deepcopy(action.draft_payload_json or {})
         draft_payload.update(payload.draft_payload)
         if payload.user_note:
             draft_payload["user_note"] = payload.user_note
         action.draft_payload_json = draft_payload
         action.status = "pending_confirmation"
-        self.db.commit()
-        self.db.refresh(action)
+        if commit:
+            self.db.commit()
+            self.db.refresh(action)
+        else:
+            self.db.flush()
         return self._response(action)
+
+    def commit_action_for_agent(self, user_id: str, pending_action_id: str) -> dict[str, Any]:
+        action = self._get_owned_action(user_id, pending_action_id, lock=True)
+        if action.status == "committed":
+            return {
+                "pending_action_id": action.id,
+                "record_type": action.committed_record_type or "",
+                "record_id": action.committed_record_id or "",
+                "record": {},
+                "message": "已保存到正式记录。",
+                "source_message_id": action.source_message_id,
+                "confidence": decimal_to_float(action.confidence),
+            }
+        self._ensure_editable(action)
+        if action.action_type == "create_meal_record":
+            record = self._commit_meal(user_id, action)
+            record_type = "meal"
+        elif action.action_type == "create_body_metric_record":
+            record = self._commit_body_metric(user_id, action)
+            record_type = "body_metric"
+        else:
+            raise AppError("VALIDATION_ERROR", "该待确认动作暂不支持确认写入", status_code=422)
+
+        action.status = "committed"
+        action.confirmed_at = utc_now()
+        action.committed_record_type = record_type
+        action.committed_record_id = record["id"]
+        message = self._record_committed_text(record_type, record)
+        self._add_action_event(
+            action=action,
+            event_type="record_committed",
+            text=message,
+            record_type=record_type,
+            record_id=record["id"],
+        )
+        self.db.flush()
+        return {
+            "pending_action_id": action.id,
+            "record_type": record_type,
+            "record_id": record["id"],
+            "record": record,
+            "message": message,
+            "source_message_id": action.source_message_id,
+            "confidence": decimal_to_float(action.confidence),
+        }
 
     def confirm_action(
         self,

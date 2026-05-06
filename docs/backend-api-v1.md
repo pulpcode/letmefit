@@ -908,7 +908,9 @@ out_of_scope
 
 ### PATCH /agent/pending-actions/{pending_action_id}
 
-修改待确认动作的草稿字段。客户端结构化编辑和用户自然语言修正后，都可以收敛到该接口。
+修改待确认动作的草稿字段。结构化编辑可以直接 PATCH `draft_payload`；普通聊天中的自然语言修改不由后端关键词解析，而是由 LLM 基于 `active_pending_actions` 判断，并在需要时调用 `update_pending_action` 工具更新原草稿。修改只更新草稿，不写入正式记录；用户仍需再次确认保存。
+
+如果用户在普通对话中明确表达保存/确认某个待确认草稿，LLM 应调用 `commit_pending_action` 工具。后端只校验该 pending action 是否仍然活跃、是否属于当前用户，以及工具调用是否引用了当前用户消息，不用关键词判断用户意图。
 
 请求：
 
@@ -946,7 +948,7 @@ out_of_scope
 
 确认成功后，`agent_pending_actions.status` 更新为 `committed`，并写入 `committed_record_type` 和 `committed_record_id`。正式记录会写入 `source_pending_action_id`，用于从记录反查来源确认动作。
 
-请求体可省略。若客户端希望确认后恢复异步 ReAct，让模型继续处理当前对话中剩余问题，可传：
+请求体可省略。正式客户端在用户确认后应传 `continue_agent=true`，让模型继续处理当前对话中被确认卡暂停的剩余问题：
 
 ```json
 {
@@ -955,7 +957,7 @@ out_of_scope
 }
 ```
 
-默认 `continue_agent=false`，旧客户端不传请求体时不会触发模型 continuation。
+后端默认 `continue_agent=false`，用于兼容旧客户端或只想写入记录、不需要继续对话的后台调用。
 
 响应：
 
@@ -971,7 +973,7 @@ out_of_scope
 }
 ```
 
-当 `continue_agent=true` 且 continuation 成功时，`data` 会额外包含：
+当 `continue_agent=true` 且 continuation 成功时，`data` 会额外包含 `continuation`。这是确认动作之后新生成的助手回复，不是用户的“确认”文本：
 
 ```json
 {

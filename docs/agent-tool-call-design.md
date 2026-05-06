@@ -23,7 +23,9 @@ User message
 - `committed`：作为普通 tool observation 回填，允许本次 loop 继续。
 - `rejected`：作为普通 tool observation 回填，允许模型下一轮追问或解释失败原因。
 
-用户确认、修改后确认、放弃确认卡时，可通过 pending action 接口传入 `continue_agent=true`。后端会把该动作构造成 `pending_action_observation`，作为新一轮 ReAct 的当前输入交给模型，让模型判断是否还有剩余问题需要继续处理。
+用户确认、修改后确认、放弃确认卡时，正式客户端默认通过 pending action 接口传入 `continue_agent=true`。后端会把该动作构造成 `pending_action_observation`，作为新一轮 ReAct 的当前输入交给模型，让模型判断是否还有剩余问题需要继续处理。这里不会把按钮文案“确认”当作普通用户消息发送给模型。
+
+用户给出修改意见时优先更新现有 pending action，而不是创建新草稿。结构化编辑直接 PATCH `draft_payload`；普通聊天中的自然语言修改交给 LLM 判断，LLM 应调用 `update_pending_action` 工具更新原草稿。用户明确表达保存或确认待确认草稿时，LLM 应调用 `commit_pending_action` 工具。后端不靠关键词判断“修改/保存”意图，只校验工具调用引用的 pending action、当前用户消息 evidence、用户归属和状态。
 
 外部 REST API 保持兼容：`POST /conversations/{id}/messages` 仍返回 `pending_actions`、`committed_records` 和 `tool_results`。调试时可通过请求字段 `include_agent_trace=true` 额外返回脱敏 `agent_trace`。
 

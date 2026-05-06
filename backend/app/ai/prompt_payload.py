@@ -56,6 +56,11 @@ CONTEXT_CONTRACT = {
             "修改或放弃后，会以 current_observation 形式进入新的请求上下文。"
         ),
         (
+            "如果 active_pending_actions 非空且当前用户消息是在修改确认卡，调用 "
+            "update_pending_action；如果当前用户消息是在确认保存确认卡，调用 "
+            "commit_pending_action。是否属于修改或确认由模型基于语义判断。"
+        ),
+        (
             "当 input_origin=pending_action_observation 时，只能把 current_observation 用于回答、"
             "规划或查库，不能据此创建新的记录写入工具调用。"
         ),

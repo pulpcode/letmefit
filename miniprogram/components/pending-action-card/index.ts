@@ -32,6 +32,7 @@ Component({
       const payload = action.draft_payload || {};
       const warnings = action.warnings || [];
       const warningFields = warnings.map((item: any) => item.field).filter(Boolean);
+      const warningText = "部分字段为估算值，确认前可修改";
 
       if (action.type === "create_meal_record") {
         const items = (payload.items || []).map((item: any) => ({
@@ -58,7 +59,8 @@ Component({
               { label: "碳水", value: numberText(Number(totalCarbs.toFixed ? totalCarbs.toFixed(1) : totalCarbs), "g") },
               { label: "脂肪", value: numberText(Number(totalFat.toFixed ? totalFat.toFixed(1) : totalFat), "g") }
             ],
-            hasWarnings: warningFields.length > 0 || (action.confidence || 1) < 0.8
+            hasWarnings: warningFields.length > 0 || (action.confidence || 1) < 0.8,
+            warningText
           }
         });
         return;
@@ -75,7 +77,8 @@ Component({
               { label: "BMI", value: numberText(payload.bmi) },
               { label: "记录时间", value: payload.recorded_at ? "刚刚" : "待确认" }
             ],
-            hasWarnings: warningFields.length > 0 || (action.confidence || 1) < 0.8
+            hasWarnings: warningFields.length > 0 || (action.confidence || 1) < 0.8,
+            warningText
           }
         });
         return;
@@ -85,7 +88,8 @@ Component({
         card: {
           kind: "unknown",
           title: "待确认动作",
-          hasWarnings: warningFields.length > 0
+          hasWarnings: warningFields.length > 0,
+          warningText
         }
       });
     },

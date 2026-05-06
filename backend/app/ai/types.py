@@ -20,11 +20,15 @@ GroundingSource = Literal[
 ToolName = Literal[
     "propose_meal_record",
     "propose_body_metric_record",
+    "update_pending_action",
+    "commit_pending_action",
     "query_meal_records",
     "query_body_metric_records",
 ]
 RECORD_TOOL_NAMES = {"propose_meal_record", "propose_body_metric_record"}
 READ_ONLY_TOOL_NAMES = {"query_meal_records", "query_body_metric_records"}
+PENDING_ACTION_TOOL_NAMES = {"update_pending_action", "commit_pending_action"}
+HUMAN_CONFIRMATION_TOOL_NAMES = RECORD_TOOL_NAMES | {"update_pending_action"}
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,10 @@ class ExtractionToolCall:
             return "create_meal_record"
         if self.name == "propose_body_metric_record":
             return "create_body_metric_record"
+        if self.name == "update_pending_action":
+            return "update_pending_action"
+        if self.name == "commit_pending_action":
+            return "commit_pending_action"
         if self.name == "query_meal_records":
             return "query_meal_records"
         if self.name == "query_body_metric_records":
@@ -89,6 +97,10 @@ class ExtractionToolCall:
     @property
     def is_read_only_tool(self) -> bool:
         return self.name in READ_ONLY_TOOL_NAMES
+
+    @property
+    def is_pending_action_tool(self) -> bool:
+        return self.name in PENDING_ACTION_TOOL_NAMES
 
 
 @dataclass(frozen=True)

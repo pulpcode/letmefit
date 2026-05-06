@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.ai.extraction_service import ExtractionService
-from app.ai.types import RECORD_TOOL_NAMES, ExtractionInput, ExtractionProviderResult
+from app.ai.types import HUMAN_CONFIRMATION_TOOL_NAMES, ExtractionInput, ExtractionProviderResult
 from app.core.config import Settings, get_settings
 from app.schemas.conversation import MessageContentItem
 
@@ -302,7 +302,7 @@ class AgentRuntime:
     def _requires_human_confirmation(self, tool_results: list[dict[str, Any]]) -> bool:
         return any(
             result.get("status") == "pending_confirmation"
-            and result.get("tool_name") in RECORD_TOOL_NAMES
+            and result.get("tool_name") in HUMAN_CONFIRMATION_TOOL_NAMES
             for result in tool_results
         )
 

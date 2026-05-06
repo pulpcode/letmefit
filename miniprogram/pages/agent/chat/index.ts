@@ -1,5 +1,5 @@
 import { createConversation, listMessages, listPendingActions, sendMessage } from "../../../services/conversations";
-import { confirmPendingAction, discardPendingAction, patchPendingAction } from "../../../services/pendingActions";
+import { confirmPendingAction, discardPendingAction } from "../../../services/pendingActions";
 import { createClientLocalUpload, transcribeUploadFile, uploadLocalFile } from "../../../services/uploads";
 import { showApiError } from "../../../utils/request";
 import { getAgentAvatar } from "../../../utils/storage";
@@ -30,6 +30,8 @@ function parseMessage(message: ConversationMessage): string {
       // audio 块本身不含文字，跳过（文字由 normalize 追加的 text 部分携带）
     } else if (part.type === "image") {
       texts.push("📷 图片");
+    } else if (part.type === "event") {
+      texts.push(part.text || "");
     }
   }
 
@@ -515,46 +517,36 @@ Page({
   // ========== PendingAction ==========
 
   async onConfirmAction(event: any) {
+    if (this.data.sending) return;
     const pendingActionId = event.detail.pendingActionId;
     try {
-      await confirmPendingAction(pendingActionId);
+      this.setData({ sending: true });
+      await confirmPendingAction(pendingActionId, true);
       wx.showToast({ title: "已保存", icon: "success" });
-      this.setData({
-        pendingActions: this.data.pendingActions.filter(
-          (item) => item.pending_action_id !== pendingActionId
-        ),
-        messages: [
-          ...this.data.messages,
-          {
-            id: `confirm_${Date.now()}`,
-            role: "assistant",
-            text: "已确认保存，可在记录页查看或修改。"
-          }
-        ]
-      });
-      this.scrollToBottom();
+      await this.refreshConversation();
     } catch (error) {
       showApiError(error);
+    } finally {
+      this.setData({ sending: false });
     }
   },
 
   async onDiscardAction(event: any) {
+    if (this.data.sending) return;
     const pendingActionId = event.detail.pendingActionId;
     try {
-      await discardPendingAction(pendingActionId);
-      this.setData({
-        pendingActions: this.data.pendingActions.filter(
-          (item) => item.pending_action_id !== pendingActionId
-        )
-      });
+      this.setData({ sending: true });
+      await discardPendingAction(pendingActionId, true);
       wx.showToast({ title: "已放弃", icon: "success" });
+      await this.refreshConversation();
     } catch (error) {
       showApiError(error);
+    } finally {
+      this.setData({ sending: false });
     }
   },
 
-  onEditAction(event: any) {
-    const { pendingActionId, action } = event.detail;
+  onEditAction() {
     wx.showModal({
       title: "修改待确认内容",
       editable: true,
@@ -562,17 +554,7 @@ Page({
       confirmText: "提交修改",
       success: async (res: any) => {
         if (!res.confirm || !res.content) return;
-        try {
-          const updated = await patchPendingAction(pendingActionId, action.draft_payload, res.content);
-          this.setData({
-            pendingActions: this.data.pendingActions.map((item) =>
-              item.pending_action_id === pendingActionId ? updated : item
-            )
-          });
-          wx.showToast({ title: "已提交修改", icon: "success" });
-        } catch (error) {
-          showApiError(error);
-        }
+        await this.sendContent([{ type: "text", text: res.content }], res.content);
       }
     });
   },

@@ -14,7 +14,7 @@ export function patchPendingAction(pendingActionId: string, draftPayload: Record
 
 export function confirmPendingAction(
   pendingActionId: string,
-  continueAgent = false,
+  continueAgent = true,
   includeAgentTrace = false
 ) {
   return request<{
@@ -32,7 +32,7 @@ export function confirmPendingAction(
 
 export function discardPendingAction(
   pendingActionId: string,
-  continueAgent = false,
+  continueAgent = true,
   includeAgentTrace = false
 ) {
   return request<{

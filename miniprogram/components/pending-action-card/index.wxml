@@ -58,7 +58,7 @@
   </view>
 
   <view wx:if="{{card.hasWarnings}}" class="warning-line">
-    <text>部分字段为估算值，确认前可修改</text>
+    <text>{{card.warningText}}</text>
   </view>
 
   <view class="pending-actions">

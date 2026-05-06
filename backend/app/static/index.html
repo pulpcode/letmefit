@@ -465,8 +465,8 @@
             显示 Agent Trace
           </label>
           <label class="checkbox">
-            <input id="continueAgentAfterConfirm" type="checkbox" />
-            确认后继续 Agent
+            <input id="continueAgentAfterConfirm" type="checkbox" checked />
+            确认/放弃后继续 Agent
           </label>
           <div class="grid" style="margin-top: 12px">
             <label>
@@ -1256,13 +1256,14 @@
             (action) => action.status === "pending_confirmation",
           );
           const confirmed = [];
-          for (const action of pendingActions) {
+          for (let index = 0; index < pendingActions.length; index += 1) {
+            const action = pendingActions[index];
             const response = await api(
               `/agent/pending-actions/${action.pending_action_id}/confirm`,
               {
                 method: "POST",
                 body: {
-                  continue_agent: continueAgentAfterConfirm(),
+                  continue_agent: continueAgentAfterConfirm() && index === pendingActions.length - 1,
                   include_agent_trace: includeAgentTrace(),
                 },
               },

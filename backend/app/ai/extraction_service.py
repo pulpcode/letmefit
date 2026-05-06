@@ -134,6 +134,15 @@ class ExtractionService:
                 )
                 continue
 
+            if tool_call.is_pending_action_tool:
+                result = self._execute_pending_action_tool(tool_call=tool_call, user_id=user_id)
+                if result.get("pending_action") is not None:
+                    pending_actions.append(result["pending_action"])
+                if result.get("committed_record") is not None:
+                    committed_records.append(result["committed_record"])
+                tool_results.append(result["tool_result"])
+                continue
+
             if not extraction:
                 continue
             action_spec = tool_call.to_action_spec()
@@ -297,6 +306,9 @@ class ExtractionService:
         if context.get("input_origin") == "pending_action_observation":
             return "record_tool_disallowed_for_pending_action_observation"
 
+        if tool_call.is_pending_action_tool:
+            return self._pending_action_tool_drop_reason(tool_call, input_text, context)
+
         grounding = tool_call.grounding
         if grounding is None:
             return "grounding_missing"
@@ -349,6 +361,44 @@ class ExtractionService:
             "normalized_media_text",
         }
 
+    def _pending_action_tool_drop_reason(
+        self,
+        tool_call: ExtractionToolCall,
+        input_text: str,
+        context: dict[str, Any],
+    ) -> str | None:
+        pending_action_id = str(tool_call.arguments.get("pending_action_id") or "").strip()
+        if not pending_action_id:
+            return "pending_action_id_missing"
+        if not self._active_pending_action_exists(pending_action_id, context):
+            return "active_pending_action_not_found"
+
+        grounding = tool_call.grounding
+        if grounding is None:
+            return "grounding_missing"
+        source = self._normalized_grounding_source(grounding.source)
+        if source != "current_user_message":
+            return "pending_action_tool_requires_current_user_message"
+        evidence_text = grounding.evidence_text.strip()
+        if not evidence_text:
+            return "evidence_text_empty"
+        if evidence_text not in input_text:
+            return "evidence_not_in_current_message"
+        return None
+
+    def _active_pending_action_exists(
+        self,
+        pending_action_id: str,
+        context: dict[str, Any],
+    ) -> bool:
+        actions = context.get("active_pending_actions")
+        if not isinstance(actions, list):
+            return False
+        return any(
+            isinstance(action, dict) and action.get("pending_action_id") == pending_action_id
+            for action in actions
+        )
+
     def _execute_read_only_tool(
         self,
         *,
@@ -369,6 +419,65 @@ class ExtractionService:
             )
             return self._tool_result(tool_call, "succeeded", data=result)
         return self._tool_result(tool_call, "rejected", reason="unsupported_read_only_tool")
+
+    def _execute_pending_action_tool(
+        self,
+        *,
+        tool_call: ExtractionToolCall,
+        user_id: str,
+    ) -> dict[str, Any]:
+        from app.schemas.pending_action import PendingActionUpdateRequest
+        from app.services.pending_actions import PendingActionService
+
+        service = PendingActionService(self.db)
+        pending_action_id = str(tool_call.arguments.get("pending_action_id") or "").strip()
+        if tool_call.name == "update_pending_action":
+            draft_payload = tool_call.arguments.get("draft_payload")
+            if not isinstance(draft_payload, dict):
+                return {
+                    "tool_result": self._tool_result(
+                        tool_call,
+                        "rejected",
+                        reason="draft_payload_missing",
+                    )
+                }
+            updated_action = service.update_action(
+                user_id,
+                pending_action_id,
+                PendingActionUpdateRequest(
+                    draft_payload=draft_payload,
+                    user_note=tool_call.arguments.get("user_note"),
+                ),
+                commit=False,
+            )
+            tool_result = self._tool_result(tool_call, "pending_confirmation", data=updated_action)
+            tool_result["pending_action_id"] = pending_action_id
+            return {"pending_action": updated_action, "tool_result": tool_result}
+
+        if tool_call.name == "commit_pending_action":
+            committed = service.commit_action_for_agent(user_id, pending_action_id)
+            record = {
+                "type": committed["record_type"],
+                "record_id": committed["record_id"],
+                "record": committed["record"],
+                "source": "pending_action_commit",
+                "source_message_id": committed["source_message_id"],
+                "confidence": committed["confidence"],
+                "decision_reason": "llm_judged_user_confirmed_pending_action",
+                "message": committed["message"],
+            }
+            return {
+                "committed_record": record,
+                "tool_result": self._tool_result(tool_call, "committed", record=record),
+            }
+
+        return {
+            "tool_result": self._tool_result(
+                tool_call,
+                "rejected",
+                reason="unsupported_pending_action_tool",
+            )
+        }
 
     def _date_arg(self, value: Any) -> date | None:
         if value is None or value == "":
@@ -575,7 +684,10 @@ class ExtractionService:
         tool_results: list[dict[str, Any]] | None = None,
     ) -> dict:
         tool_results = tool_results or []
-        pending_response = [self._pending_response(action) for action in pending_actions]
+        pending_response = [
+            action if isinstance(action, dict) else self._pending_response(action)
+            for action in pending_actions
+        ]
         return {
             "assistant_text": self._assistant_text(
                 provider_result.assistant_text,

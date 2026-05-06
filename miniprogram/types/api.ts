@@ -127,11 +127,22 @@ export type MessagePart =
   | { type: "image"; file_id: string; source?: "camera" | "album" | "upload" }
   | { type: "audio"; file_id: string; duration_seconds?: number };
 
+export type ConversationMessagePart =
+  | MessagePart
+  | {
+      type: "event";
+      event_type: string;
+      text?: string;
+      pending_action_id?: string;
+      record_type?: string;
+      record_id?: string;
+    };
+
 export type ConversationMessage = {
   id: string;
   conversation_id: string;
   role: "user" | "assistant";
-  content: MessagePart[];
+  content: ConversationMessagePart[];
   intent?: string | null;
   requires_review?: boolean;
   created_at: string;

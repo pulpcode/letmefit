@@ -946,6 +946,17 @@ out_of_scope
 
 确认成功后，`agent_pending_actions.status` 更新为 `committed`，并写入 `committed_record_type` 和 `committed_record_id`。正式记录会写入 `source_pending_action_id`，用于从记录反查来源确认动作。
 
+请求体可省略。若客户端希望确认后恢复异步 ReAct，让模型继续处理当前对话中剩余问题，可传：
+
+```json
+{
+  "continue_agent": true,
+  "include_agent_trace": true
+}
+```
+
+默认 `continue_agent=false`，旧客户端不传请求体时不会触发模型 continuation。
+
 响应：
 
 ```json
@@ -960,9 +971,30 @@ out_of_scope
 }
 ```
 
+当 `continue_agent=true` 且 continuation 成功时，`data` 会额外包含：
+
+```json
+{
+  "continuation": {
+    "assistant_message_id": "msg_...",
+    "assistant_text": "已确认午餐，我继续帮你安排今晚晚餐...",
+    "intent": "answer_fitness_question",
+    "requires_review": false,
+    "pending_actions": [],
+    "committed_records": [],
+    "tool_results": [],
+    "agent_trace": []
+  }
+}
+```
+
+确认动作会作为内部 `pending_action_observation` 进入新一轮 ReAct。该来源只能用于回答、规划或只读查询，不能直接触发新的记录写入。
+
 ### POST /agent/pending-actions/{pending_action_id}/discard
 
 放弃待确认动作。
+
+请求体同 confirm，可省略。传 `continue_agent=true` 时，后端会把放弃事件作为 `pending_action_observation` 交给模型，让模型判断是否仍可在不保存该记录的前提下继续回答，或是否需要追问。
 
 响应：
 
@@ -975,6 +1007,8 @@ out_of_scope
   "request_id": "req_..."
 }
 ```
+
+当 `continue_agent=true` 且 continuation 成功时，响应同样可包含 `continuation`。
 
 ## 10. 文件上传与媒体引用
 

@@ -693,6 +693,52 @@ def test_extraction_service_rejects_confirmed_record_as_new_record_source() -> N
     assert result["tool_results"][0]["reason"] == "source=confirmed_record"
 
 
+def test_extraction_service_rejects_record_tool_from_pending_action_observation() -> None:
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我会继续安排晚餐，不会把确认事件再写成记录。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.90"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
+                    confidence=Decimal("0.90"),
+                    arguments={
+                        "recorded_at": "2026-05-06T12:30:00+08:00",
+                        "source_type": "manual",
+                        "meal_type": "lunch",
+                        "items": [{"name": "炒面", "portion_text": "一份"}],
+                    },
+                    grounding=ActionGrounding(
+                        source="current_user_message",
+                        evidence_text="用户已确认待确认动作",
+                    ),
+                    warnings=[],
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[
+            MessageContentItem(type="text", text="用户已确认待确认动作。已保存到正式记录：午餐。")
+        ],
+        context={"input_origin": "pending_action_observation"},
+    )
+
+    assert result["pending_actions"] == []
+    assert result["committed_records"] == []
+    assert result["tool_results"][0]["status"] == "rejected"
+    assert result["tool_results"][0]["reason"] == (
+        "record_tool_disallowed_for_pending_action_observation"
+    )
+
+
 def test_extraction_service_executes_read_only_meal_query_tool(monkeypatch) -> None:
     monkeypatch.setattr("app.ai.extraction_service.MealService", FakeMealQueryService)
     provider = FakeProvider(

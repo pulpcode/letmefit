@@ -6,6 +6,7 @@ from app.ai.types import ExtractionInput
 CONTEXT_CONTRACT = {
     "authority_order": [
         "message_content",
+        "current_observation",
         "profile",
         "recent_records",
         "active_pending_actions",
@@ -49,6 +50,14 @@ CONTEXT_CONTRACT = {
         (
             "后端会在一次请求内运行有上限的 ReAct loop；简单问题可以直接 assistant_text 回答，"
             "需要查库时可请求只读工具，信息不足时用 assistant_text 追问且 tool_calls=[]。"
+        ),
+        (
+            "记录工具生成 pending_confirmation 时，本次 loop 会暂停等待用户确认；用户确认、"
+            "修改或放弃后，会以 current_observation 形式进入新的请求上下文。"
+        ),
+        (
+            "当 input_origin=pending_action_observation 时，只能把 current_observation 用于回答、"
+            "规划或查库，不能据此创建新的记录写入工具调用。"
         ),
         (
             "profile、recent_records、active_pending_actions 已在默认上下文中；不要为了读取它们"

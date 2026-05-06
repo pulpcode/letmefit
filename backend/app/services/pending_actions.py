@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -5,15 +6,28 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai.agent_runtime import AgentRuntime
 from app.ai.draft_normalizer import normalize_pending_action_draft
 from app.auth.security import new_id, utc_now
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.models import AgentPendingAction, Conversation, ConversationMessage
-from app.schemas.pending_action import PendingActionUpdateRequest, decimal_to_float
+from app.schemas.conversation import MessageContentItem
+from app.schemas.pending_action import (
+    PendingActionContinuationRequest,
+    PendingActionUpdateRequest,
+    decimal_to_float,
+)
 from app.schemas.records import BodyMetricCreateRequest, MealCreateRequest
 from app.services.body_metrics import BodyMetricService
+from app.services.conversation_context import ConversationContextBuilder
+from app.services.dialogue_state import (
+    normalize_dialogue_state,
+    update_dialogue_state_after_assistant,
+)
 from app.services.meals import MealService
+
+logger = logging.getLogger(__name__)
 
 EDITABLE_STATUSES = {"needs_clarification", "pending_confirmation"}
 
@@ -54,7 +68,13 @@ class PendingActionService:
         self.db.refresh(action)
         return self._response(action)
 
-    def confirm_action(self, user_id: str, pending_action_id: str) -> dict:
+    def confirm_action(
+        self,
+        user_id: str,
+        pending_action_id: str,
+        payload: PendingActionContinuationRequest | None = None,
+    ) -> dict:
+        payload = payload or PendingActionContinuationRequest()
         action = self._get_owned_action(user_id, pending_action_id, lock=True)
         if action.status == "committed":
             return self._committed_response(action)
@@ -72,17 +92,39 @@ class PendingActionService:
         action.confirmed_at = utc_now()
         action.committed_record_type = record_type
         action.committed_record_id = record["id"]
-        self._add_action_event(
+        event_message = self._add_action_event(
             action=action,
             event_type="record_committed",
             text=self._record_committed_text(record_type, record),
             record_type=record_type,
             record_id=record["id"],
         )
+        event_message_id = event_message.id
         self.db.commit()
-        return self._committed_response(action)
+        response = self._committed_response(action)
+        if payload.continue_agent:
+            observation = self._confirmed_observation(
+                action=action,
+                record_type=record_type,
+                record=record,
+            )
+            continuation = self._run_continuation(
+                action=action,
+                observation=observation,
+                event_message_id=event_message_id,
+                include_agent_trace=payload.include_agent_trace,
+            )
+            if continuation is not None:
+                response["continuation"] = continuation
+        return response
 
-    def discard_action(self, user_id: str, pending_action_id: str) -> dict:
+    def discard_action(
+        self,
+        user_id: str,
+        pending_action_id: str,
+        payload: PendingActionContinuationRequest | None = None,
+    ) -> dict:
+        payload = payload or PendingActionContinuationRequest()
         action = self._get_owned_action(user_id, pending_action_id, lock=True)
         if action.status == "discarded":
             return {
@@ -91,16 +133,28 @@ class PendingActionService:
             }
         self._ensure_editable(action)
         action.status = "discarded"
-        self._add_action_event(
+        event_message = self._add_action_event(
             action=action,
             event_type="pending_action_discarded",
             text="已放弃这条候选记录。",
         )
+        event_message_id = event_message.id
         self.db.commit()
-        return {
+        response = {
             "pending_action_id": action.id,
             "status": action.status,
         }
+        if payload.continue_agent:
+            observation = self._discarded_observation(action)
+            continuation = self._run_continuation(
+                action=action,
+                observation=observation,
+                event_message_id=event_message_id,
+                include_agent_trace=payload.include_agent_trace,
+            )
+            if continuation is not None:
+                response["continuation"] = continuation
+        return response
 
     def _commit_meal(self, user_id: str, action: AgentPendingAction) -> dict:
         draft_payload = self._draft_with_source(action)
@@ -137,6 +191,9 @@ class PendingActionService:
         return draft_payload
 
     def _ensure_owned_conversation(self, user_id: str, conversation_id: str) -> None:
+        self._get_owned_conversation(user_id, conversation_id)
+
+    def _get_owned_conversation(self, user_id: str, conversation_id: str) -> Conversation:
         conversation = self.db.scalar(
             select(Conversation).where(
                 Conversation.id == conversation_id,
@@ -145,6 +202,7 @@ class PendingActionService:
         )
         if not conversation:
             raise AppError("RESOURCE_NOT_FOUND", "会话不存在", status_code=404)
+        return conversation
 
     def _get_owned_action(
         self,
@@ -187,6 +245,108 @@ class PendingActionService:
             "record_id": action.committed_record_id or "",
         }
 
+    def _confirmed_observation(
+        self,
+        *,
+        action: AgentPendingAction,
+        record_type: str,
+        record: dict[str, Any],
+    ) -> dict[str, Any]:
+        summary = self._record_committed_text(record_type, record)
+        return {
+            "type": "pending_action_observation",
+            "event": "confirmed",
+            "pending_action_id": action.id,
+            "action_type": action.action_type,
+            "record_type": record_type,
+            "record_id": record["id"],
+            "record_summary": summary,
+            "text": f"用户已确认待确认动作。{summary}",
+        }
+
+    def _discarded_observation(self, action: AgentPendingAction) -> dict[str, Any]:
+        return {
+            "type": "pending_action_observation",
+            "event": "discarded",
+            "pending_action_id": action.id,
+            "action_type": action.action_type,
+            "text": "用户已放弃这条候选记录。",
+        }
+
+    def _run_continuation(
+        self,
+        *,
+        action: AgentPendingAction,
+        observation: dict[str, Any],
+        event_message_id: str,
+        include_agent_trace: bool,
+    ) -> dict[str, Any] | None:
+        try:
+            conversation = self._get_owned_conversation(action.user_id, action.conversation_id)
+            previous_dialogue_state = normalize_dialogue_state(conversation.dialogue_state_json)
+            context = ConversationContextBuilder(self.db).build(
+                user_id=action.user_id,
+                conversation_id=action.conversation_id,
+                dialogue_state=previous_dialogue_state,
+            )
+            context["current_observation"] = observation
+            context["input_origin"] = "pending_action_observation"
+            content = [
+                MessageContentItem(
+                    type="text",
+                    text=observation["text"],
+                    source="pending_action_observation",
+                )
+            ]
+            result = AgentRuntime(self.db).run(
+                user_id=action.user_id,
+                conversation_id=action.conversation_id,
+                message_id=event_message_id,
+                content=content,
+                context=context,
+            )
+            assistant_created_at = utc_now()
+            assistant_message = ConversationMessage(
+                id=new_id("msg"),
+                conversation_id=action.conversation_id,
+                user_id=action.user_id,
+                role="assistant",
+                content_json=result.get("assistant_content")
+                or [{"type": "text", "text": result["assistant_text"]}],
+                intent=result["intent"],
+                requires_review=result["requires_review"],
+                created_at=assistant_created_at,
+            )
+            conversation.dialogue_state_json = update_dialogue_state_after_assistant(
+                previous_dialogue_state,
+                assistant_text=result["assistant_text"],
+                assistant_message_id=assistant_message.id,
+                created_at=assistant_created_at,
+                dialogue_state_patch=result.get("dialogue_state_patch"),
+            )
+            conversation.dialogue_state_updated_at = utc_now()
+            self.db.add(assistant_message)
+            self.db.commit()
+            response = {
+                "assistant_message_id": assistant_message.id,
+                "assistant_text": result["assistant_text"],
+                "intent": result["intent"],
+                "requires_review": result["requires_review"],
+                "pending_actions": result["pending_actions"],
+                "committed_records": result["committed_records"],
+                "tool_results": result.get("tool_results", []),
+            }
+            if include_agent_trace:
+                response["agent_trace"] = result.get("agent_trace", [])
+            return response
+        except AppError as exc:
+            logger.warning(
+                "agent_continuation_failed pending_action_id=%s code=%s",
+                action.id,
+                exc.code,
+            )
+            return None
+
     def _add_action_event(
         self,
         action: AgentPendingAction,
@@ -194,7 +354,7 @@ class PendingActionService:
         text: str,
         record_type: str | None = None,
         record_id: str | None = None,
-    ) -> None:
+    ) -> ConversationMessage:
         content: dict[str, Any] = {
             "type": "event",
             "event_type": event_type,
@@ -205,18 +365,18 @@ class PendingActionService:
             content["record_type"] = record_type
         if record_id:
             content["record_id"] = record_id
-        self.db.add(
-            ConversationMessage(
-                id=new_id("msg"),
-                conversation_id=action.conversation_id,
-                user_id=action.user_id,
-                role="assistant",
-                content_json=[content],
-                intent="fitness_record",
-                requires_review=False,
-                created_at=utc_now(),
-            )
+        message = ConversationMessage(
+            id=new_id("msg"),
+            conversation_id=action.conversation_id,
+            user_id=action.user_id,
+            role="assistant",
+            content_json=[content],
+            intent="fitness_record",
+            requires_review=False,
+            created_at=utc_now(),
         )
+        self.db.add(message)
+        return message
 
     def _record_committed_text(self, record_type: str, record: dict) -> str:
         if record_type == "meal":

@@ -162,6 +162,17 @@ export type SendMessageResponse = {
   pending_actions?: PendingAction[];
 };
 
+export type AgentContinuation = {
+  assistant_message_id: string;
+  assistant_text: string;
+  intent: string;
+  requires_review: boolean;
+  committed_records?: Array<Record<string, unknown>>;
+  pending_actions?: PendingAction[];
+  tool_results?: Array<Record<string, unknown>>;
+  agent_trace?: Array<Record<string, unknown>>;
+};
+
 export type UploadFile = {
   id: string;
   storage_provider: string;

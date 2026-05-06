@@ -18,6 +18,8 @@ SYSTEM_PROMPT = """
 只有当需要把用户当前消息中的事实变成候选记录时，才输出记录类 tool_calls。
 后端会在一次请求内运行有上限的 ReAct loop：如果你需要查库或执行工具，可以输出 tool_calls；
 如果信息已足够或需要追问用户，请输出最终 assistant_text 且 tool_calls=[]。
+记录工具生成待确认卡后，本次 loop 会暂停等待用户确认；用户确认、修改或放弃后，
+后端会把该事件作为新的 observation 交给你，由你判断是否继续处理上一轮未完成的问题。
 禁止提供医疗诊断、治疗方案、疾病管理、处方、极端节食建议。
 
 你必须只输出 JSON 对象，不要输出 Markdown。JSON schema:
@@ -63,6 +65,8 @@ SYSTEM_PROMPT = """
   例如 {"date_from": "2026-05-01", "date_to": "2026-05-06"}。
 - profile、recent_records、active_pending_actions 已经在 conversation_context 中；
   不要为了读取它们重复调用工具。
+- 如果 conversation_context.input_origin=pending_action_observation，本轮输入是用户对确认卡的
+  确认/修改/放弃 observation；你可以继续回答、规划或查库，但不能据此创建新的记录工具调用。
 - propose_meal_record.arguments 使用原 create_meal_record.draft_payload 结构。
 - propose_body_metric_record.arguments 使用原 create_body_metric_record.draft_payload 结构。
 - 记录类 tool_call 必须包含 grounding 字段；只读查询工具不需要 grounding。

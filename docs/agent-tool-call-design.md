@@ -2,7 +2,7 @@
 
 ## Summary
 
-当前模型定位是“健身管理对话助手 + 结构化记录工具调用者”。后端在一次请求内运行 bounded ReAct loop：
+当前模型定位是“健身管理对话助手 + 结构化记录工具调用者”。后端运行 bounded ReAct loop；记录草稿需要人确认时，loop 会异步暂停，等待用户确认/修改/放弃后再用 observation 恢复：
 
 ```text
 User message
@@ -15,13 +15,21 @@ User message
 -> ConversationMessage + API response
 ```
 
-简单问题通常一轮模型决策结束并直接返回 `assistant_text`。复杂问题可以先调用工具，后端把 `tool_results` 放回上下文后再让模型生成最终回答。信息不足时，模型应直接用 `assistant_text` 追问用户，`tool_calls=[]`，后端不会创建草稿。
+简单问题通常一轮模型决策结束并直接返回 `assistant_text`。复杂问题可以先调用只读工具，后端把 `tool_results` 放回上下文后再让模型生成最终回答。信息不足时，模型应直接用 `assistant_text` 追问用户，`tool_calls=[]`，后端不会创建草稿。
+
+记录工具遵循异步确认语义：
+
+- `pending_confirmation`：创建确认卡后立即结束当前 HTTP 请求，trace 追加 `human_confirmation_required`，等待用户动作。
+- `committed`：作为普通 tool observation 回填，允许本次 loop 继续。
+- `rejected`：作为普通 tool observation 回填，允许模型下一轮追问或解释失败原因。
+
+用户确认、修改后确认、放弃确认卡时，可通过 pending action 接口传入 `continue_agent=true`。后端会把该动作构造成 `pending_action_observation`，作为新一轮 ReAct 的当前输入交给模型，让模型判断是否还有剩余问题需要继续处理。
 
 外部 REST API 保持兼容：`POST /conversations/{id}/messages` 仍返回 `pending_actions`、`committed_records` 和 `tool_results`。调试时可通过请求字段 `include_agent_trace=true` 额外返回脱敏 `agent_trace`。
 
 ## Loop Limits
 
-第一版 loop 只在单次请求内运行，不持久化中间状态，也不支持中断恢复。默认限制：
+第一版不持久化模型内部推理栈。普通 loop 只在单次请求内运行；遇到确认卡时暂停，用户动作会作为新的 observation 触发一轮新的 bounded loop。默认限制：
 
 - 最多 3 次模型决策。
 - 最多 2 轮工具执行。
@@ -29,7 +37,7 @@ User message
 - 单次请求最多 6 个工具调用。
 - 单次 loop 有总超时保护。
 
-触发限制后，后端停止执行新的工具调用，返回受控降级回答，并在 trace 中加入 `loop_limit_reached`。
+触发限制后，后端停止执行新的工具调用，返回受控降级回答，并在 trace 中加入 `loop_limit_reached`。运行时熔断只写入 `agent_trace`，不会伪装成 `tool_results` 中的工具结果。
 
 ## Available Tools
 
@@ -189,6 +197,7 @@ agent_started
 model_decision
 tool_call_started
 tool_result
+human_confirmation_required
 clarifying_question
 final_answer
 loop_limit_reached
@@ -208,6 +217,44 @@ loop_limit_reached
 ```
 
 后续如需实时展示过程，可新增 `POST /conversations/{id}/messages/stream`，返回 chunked NDJSON 或 SSE-like event stream。当前普通 JSON 接口继续作为兼容 fallback。
+
+## Pending Action Observation
+
+确认卡的用户动作可恢复异步 ReAct。接口请求体：
+
+```json
+{
+  "continue_agent": true,
+  "include_agent_trace": true
+}
+```
+
+确认成功后，后端内部构造 observation：
+
+```json
+{
+  "type": "pending_action_observation",
+  "event": "confirmed",
+  "pending_action_id": "pa_...",
+  "action_type": "create_meal_record",
+  "record_type": "meal",
+  "record_id": "meal_...",
+  "record_summary": "午餐：炒面，约 650 千卡"
+}
+```
+
+放弃时：
+
+```json
+{
+  "type": "pending_action_observation",
+  "event": "discarded",
+  "pending_action_id": "pa_...",
+  "action_type": "create_meal_record"
+}
+```
+
+该 observation 会进入 `conversation_context.current_observation`，并设置 `input_origin=pending_action_observation`。在这个输入来源下，模型可以回答、规划或调用只读查询工具，但不能基于 observation 创建新的记录写入工具调用；若输出记录工具，后端会拒绝，不创建新的 pending action。
 
 ## Response Composition
 

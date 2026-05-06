@@ -215,9 +215,9 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     )
     assert prompt_json["context_contract"]["authority_order"][:4] == [
         "message_content",
+        "current_observation",
         "profile",
         "recent_records",
-        "active_pending_actions",
     ]
     assert "当前用户意图的最高优先级来源" in "".join(
         prompt_json["context_contract"]["rules"]
@@ -233,6 +233,8 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     )
     assert "ReAct loop" in "".join(prompt_json["context_contract"]["rules"])
     assert "只读工具" in "".join(prompt_json["context_contract"]["rules"])
+    assert "current_observation" in "".join(prompt_json["context_contract"]["rules"])
+    assert "pending_action_observation" in "".join(prompt_json["context_contract"]["rules"])
     system_prompt = client.completions.calls[0]["messages"][0]["content"]
     assert "健身管理对话助手" in system_prompt
     assert "结构化记录工具调用者" in system_prompt

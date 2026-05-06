@@ -464,6 +464,10 @@
             <input id="includeAgentTrace" type="checkbox" checked />
             显示 Agent Trace
           </label>
+          <label class="checkbox">
+            <input id="continueAgentAfterConfirm" type="checkbox" />
+            确认后继续 Agent
+          </label>
           <div class="grid" style="margin-top: 12px">
             <label>
               Pending Action ID
@@ -640,6 +644,10 @@
 
       function includeAgentTrace() {
         return $("includeAgentTrace").checked;
+      }
+
+      function continueAgentAfterConfirm() {
+        return $("continueAgentAfterConfirm").checked;
       }
 
       function messagePartText(part) {
@@ -839,7 +847,13 @@
 
       async function confirmAction(pendingActionId) {
         const response = await run(() =>
-          api(`/agent/pending-actions/${pendingActionId}/confirm`, { method: "POST" }),
+          api(`/agent/pending-actions/${pendingActionId}/confirm`, {
+            method: "POST",
+            body: {
+              continue_agent: continueAgentAfterConfirm(),
+              include_agent_trace: includeAgentTrace(),
+            },
+          }),
         );
         await refreshPendingActions();
         await refreshMessages();
@@ -848,7 +862,13 @@
 
       async function discardAction(pendingActionId) {
         const response = await run(() =>
-          api(`/agent/pending-actions/${pendingActionId}/discard`, { method: "POST" }),
+          api(`/agent/pending-actions/${pendingActionId}/discard`, {
+            method: "POST",
+            body: {
+              continue_agent: continueAgentAfterConfirm(),
+              include_agent_trace: includeAgentTrace(),
+            },
+          }),
         );
         await refreshPendingActions();
         await refreshMessages();
@@ -1239,7 +1259,13 @@
           for (const action of pendingActions) {
             const response = await api(
               `/agent/pending-actions/${action.pending_action_id}/confirm`,
-              { method: "POST" },
+              {
+                method: "POST",
+                body: {
+                  continue_agent: continueAgentAfterConfirm(),
+                  include_agent_trace: includeAgentTrace(),
+                },
+              },
             );
             confirmed.push(response.data);
           }

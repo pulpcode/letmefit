@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.ai.extraction_service import ExtractionService
-from app.ai.types import ExtractionInput, ExtractionProviderResult
+from app.ai.types import RECORD_TOOL_NAMES, ExtractionInput, ExtractionProviderResult
 from app.core.config import Settings, get_settings
 from app.schemas.conversation import MessageContentItem
 
@@ -90,32 +90,26 @@ class AgentRuntime:
                     trace=trace,
                 )
 
-            if self._loop_limit_reached(
+            limit_reason = self._loop_limit_reason(
                 model_turn=model_turn,
                 tool_rounds=tool_rounds,
                 total_tool_calls=total_tool_calls,
                 started_at=started_at,
-            ):
+            )
+            if limit_reason:
                 trace.append(
                     {
                         "event": "loop_limit_reached",
                         "model_turn": model_turn,
                         "tool_rounds": tool_rounds,
+                        "reason": limit_reason,
                     }
                 )
                 return self._response(
                     provider_result=self._limit_result(provider_result),
                     pending_actions=pending_actions,
                     committed_records=committed_records,
-                    tool_results=[
-                        *tool_results,
-                        {
-                            "tool_name": "agent_loop",
-                            "action_type": "agent_loop",
-                            "status": "rejected",
-                            "reason": "loop_limit_reached",
-                        },
-                    ],
+                    tool_results=tool_results,
                     trace=trace,
                 )
 
@@ -131,21 +125,14 @@ class AgentRuntime:
                         "event": "loop_limit_reached",
                         "model_turn": model_turn,
                         "tool_rounds": tool_rounds,
+                        "reason": "max_total_tool_calls",
                     }
                 )
                 return self._response(
                     provider_result=self._limit_result(provider_result),
                     pending_actions=pending_actions,
                     committed_records=committed_records,
-                    tool_results=[
-                        *tool_results,
-                        {
-                            "tool_name": "agent_loop",
-                            "action_type": "agent_loop",
-                            "status": "rejected",
-                            "reason": "loop_limit_reached",
-                        },
-                    ],
+                    tool_results=tool_results,
                     trace=trace,
                 )
 
@@ -195,6 +182,25 @@ class AgentRuntime:
                         "reason": result.get("reason"),
                     }
                 )
+            if self._requires_human_confirmation(new_tool_results):
+                trace.append(
+                    {
+                        "event": "human_confirmation_required",
+                        "tool_round": tool_rounds,
+                        "pending_action_ids": [
+                            result.get("pending_action_id")
+                            for result in new_tool_results
+                            if result.get("status") == "pending_confirmation"
+                        ],
+                    }
+                )
+                return self._response(
+                    provider_result=provider_result,
+                    pending_actions=pending_actions,
+                    committed_records=committed_records,
+                    tool_results=tool_results,
+                    trace=trace,
+                )
 
         trace.append({"event": "loop_limit_reached", "reason": "max_model_turns"})
         return self._response(
@@ -220,8 +226,31 @@ class AgentRuntime:
             committed_records,
             tool_results,
         )
+        if self._should_append_final_text(
+            provider_result=provider_result,
+            pending_actions=pending_actions,
+            committed_records=committed_records,
+        ):
+            final_text = provider_result.assistant_text.strip()
+            response["assistant_text"] = f'{response["assistant_text"]} {final_text}'
+            response["assistant_content"].append({"type": "text", "text": final_text})
         response["agent_trace"] = trace
         return response
+
+    def _should_append_final_text(
+        self,
+        *,
+        provider_result: ExtractionProviderResult,
+        pending_actions: list,
+        committed_records: list[dict[str, Any]],
+    ) -> bool:
+        if provider_result.tool_calls or pending_actions or not committed_records:
+            return False
+        final_text = provider_result.assistant_text.strip()
+        if not final_text:
+            return False
+        committed_messages = {str(record.get("message") or "") for record in committed_records}
+        return final_text not in committed_messages
 
     def _loop_context(
         self,
@@ -252,21 +281,30 @@ class AgentRuntime:
         }
         return loop_context
 
-    def _loop_limit_reached(
+    def _loop_limit_reason(
         self,
         *,
         model_turn: int,
         tool_rounds: int,
         total_tool_calls: int,
         started_at: float,
-    ) -> bool:
+    ) -> str | None:
         if model_turn >= max(1, self.settings.agent_max_model_turns):
-            return True
+            return "max_model_turns"
         if tool_rounds >= max(0, self.settings.agent_max_tool_rounds):
-            return True
+            return "max_tool_rounds"
         if total_tool_calls >= max(1, self.settings.agent_max_total_tool_calls):
-            return True
-        return monotonic() - started_at > max(1, self.settings.agent_loop_timeout_seconds)
+            return "max_total_tool_calls"
+        if monotonic() - started_at > max(1, self.settings.agent_loop_timeout_seconds):
+            return "timeout"
+        return None
+
+    def _requires_human_confirmation(self, tool_results: list[dict[str, Any]]) -> bool:
+        return any(
+            result.get("status") == "pending_confirmation"
+            and result.get("tool_name") in RECORD_TOOL_NAMES
+            for result in tool_results
+        )
 
     def _decision_label(self, provider_result: ExtractionProviderResult) -> str:
         if provider_result.tool_calls:

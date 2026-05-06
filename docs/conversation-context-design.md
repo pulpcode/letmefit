@@ -510,23 +510,26 @@ body_metric_records
 
 ```text
 1. 当前 message_content
-2. 正式数据：profile、recent_records
-3. 当前仍活跃的 active_pending_actions
-4. ephemeral_state.active_offer 作为一回合承接令牌
-5. input_normalization 作为当前媒体处理证据
-6. conversation_summary
-7. recent_messages
+2. 当前 observation：`current_observation`，仅当 `input_origin=pending_action_observation` 时存在
+3. 正式数据：profile、recent_records
+4. 当前仍活跃的 active_pending_actions
+5. ephemeral_state.active_offer 作为一回合承接令牌
+6. input_normalization 作为当前媒体处理证据
+7. conversation_summary
+8. recent_messages
 ```
 
 解释：
 
 - `message_content` 是本轮任务本身。
+- `current_observation` 表示用户刚刚确认或放弃了确认卡，用于恢复异步 ReAct。
 - `profile` 与 `recent_records` 是后端正式数据，可信度最高。
 - `active_pending_actions` 表示当前仍需要用户处理的草稿。
 - `active_offer` 只能帮助判断用户是否承接上一轮提议，不是正式事实。
 - `conversation_summary` 和 `recent_messages` 只是帮助理解上下文，不能覆盖正式数据。
 - 旧 assistant 文案不能作为 pending action 是否存在的依据。
 - AgentRuntime 会把本次 loop 中的 `tool_results` 放入 `conversation_context.agent_loop`，仅用于本次请求内的后续模型决策。
+- `input_origin=pending_action_observation` 时，模型只能基于 observation 回答、规划或调用只读查询工具，不能创建新的记录写入工具。
 - `profile`、`recent_records`、`active_pending_actions` 已经默认进入上下文，不需要再设计成必调只读工具。
 - 记录写入使用分级 grounding：当前消息或可信媒体文本可进入自动保存判断；历史用户消息、活跃草稿、工具结果和助手方案最多创建确认卡；正式记录只用于回答和总结；模型推断不能写记录。
 
@@ -555,6 +558,7 @@ body_metric_records
   "context_contract": {
     "authority_order": [
       "message_content",
+      "current_observation",
       "profile",
       "recent_records",
       "active_pending_actions",
@@ -566,6 +570,7 @@ body_metric_records
     "rules": [
       "当前消息优先于历史消息。",
       "正式记录优先于历史对话文本。",
+      "pending_action_observation 可用于继续回答或规划，但不能直接触发新的记录写入。",
       "只有 active_pending_actions 表示当前仍待确认。",
       "profile、recent_records、active_pending_actions 已在默认上下文中，不要为了读取它们重复调用工具。",
       "需要查库时可调用只读工具，信息不足时 assistant_text 追问且 tool_calls=[]。",
@@ -576,6 +581,7 @@ body_metric_records
   "message_content": [],
   "conversation_context": {
     "profile": {},
+    "current_observation": {},
     "official_recent_records": {},
     "active_pending_actions": [],
     "conversation_summary": {},

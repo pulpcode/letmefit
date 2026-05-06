@@ -3,7 +3,12 @@ from decimal import Decimal
 from app.ai.agent_runtime import AgentRuntime
 from app.ai.extraction_service import ExtractionService
 from app.ai.providers.base import ExtractionProvider
-from app.ai.types import ExtractionInput, ExtractionProviderResult, ExtractionToolCall
+from app.ai.types import (
+    ActionGrounding,
+    ExtractionInput,
+    ExtractionProviderResult,
+    ExtractionToolCall,
+)
 from app.core.config import Settings
 from app.schemas.conversation import MessageContentItem
 
@@ -50,6 +55,27 @@ class FakeMealService:
                     "items": [{"name": "鸡胸肉"}],
                 }
             ]
+        }
+
+
+class FakeBodyMetricService:
+    def __init__(self, db) -> None:
+        self.db = db
+
+    def create_body_metric(self, user_id, payload, commit=True):
+        return {
+            "id": "bm_auto",
+            "recorded_at": payload.recorded_at,
+            "recorded_tz": payload.recorded_tz,
+            "local_date": payload.recorded_at.date(),
+            "source_type": payload.source_type,
+            "weight_kg": float(payload.weight_kg),
+            "body_fat_percentage": None,
+            "bmi": None,
+            "muscle_mass_kg": None,
+            "water_percentage": None,
+            "confidence": 0.9,
+            "source_pending_action_id": None,
         }
 
 
@@ -178,6 +204,107 @@ def test_agent_runtime_runs_query_tool_then_final_answer(monkeypatch) -> None:
     ]
 
 
+def test_agent_runtime_pauses_when_record_tool_requires_human_confirmation() -> None:
+    provider = SequenceProvider(
+        [
+            ExtractionProviderResult(
+                assistant_text="我先整理成餐食草稿。",
+                intent="fitness_record",
+                requires_review=True,
+                confidence=Decimal("0.70"),
+                tool_calls=[
+                    ExtractionToolCall(
+                        name="propose_meal_record",
+                        arguments={
+                            "recorded_at": "2026-05-06T12:30:00+08:00",
+                            "source_type": "text",
+                            "meal_type": "lunch",
+                            "items": [{"name": "炒面", "portion_text": "一份"}],
+                        },
+                        grounding=ActionGrounding(
+                            source="current_user_message",
+                            evidence_text="中午吃了炒面",
+                        ),
+                    )
+                ],
+            ),
+            ExtractionProviderResult(
+                assistant_text="不应该进入第二轮。",
+                intent="answer_fitness_question",
+                requires_review=False,
+                confidence=Decimal("0.80"),
+            ),
+        ]
+    )
+    runtime = _runtime(provider)
+
+    result = runtime.run(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=_content("中午吃了炒面，帮我安排今晚晚餐"),
+        context={},
+    )
+
+    assert len(provider.payloads) == 1
+    assert result["pending_actions"][0]["type"] == "create_meal_record"
+    assert result["tool_results"][0]["status"] == "pending_confirmation"
+    assert result["agent_trace"][-1]["event"] == "human_confirmation_required"
+
+
+def test_agent_runtime_continues_after_auto_committed_record(monkeypatch) -> None:
+    monkeypatch.setattr("app.ai.extraction_service.BodyMetricService", FakeBodyMetricService)
+    provider = SequenceProvider(
+        [
+            ExtractionProviderResult(
+                assistant_text="我记录一下体重。",
+                intent="fitness_record",
+                requires_review=True,
+                confidence=Decimal("0.90"),
+                tool_calls=[
+                    ExtractionToolCall(
+                        name="propose_body_metric_record",
+                        confidence=Decimal("0.90"),
+                        arguments={
+                            "recorded_at": "2026-05-06T08:00:00+08:00",
+                            "source_type": "text",
+                            "weight_kg": 72.4,
+                        },
+                        grounding=ActionGrounding(
+                            source="current_user_message",
+                            evidence_text="今天体重72.4公斤",
+                        ),
+                    )
+                ],
+            ),
+            ExtractionProviderResult(
+                assistant_text="体重已记录，今天训练建议轻量力量训练。",
+                intent="answer_fitness_question",
+                requires_review=False,
+                confidence=Decimal("0.80"),
+            ),
+        ]
+    )
+    runtime = _runtime(provider)
+
+    result = runtime.run(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=_content("今天体重72.4公斤，给我训练建议"),
+        context={},
+    )
+
+    assert len(provider.payloads) == 2
+    assert result["committed_records"][0]["type"] == "body_metric"
+    assert result["assistant_text"] == (
+        "已自动保存：体重 72.4kg。可在记录页修改或删除。"
+        " 体重已记录，今天训练建议轻量力量训练。"
+    )
+    assert result["assistant_content"][-1]["text"] == "体重已记录，今天训练建议轻量力量训练。"
+    assert any(event["event"] == "final_answer" for event in result["agent_trace"])
+
+
 def test_agent_runtime_stops_when_model_turn_limit_is_reached(monkeypatch) -> None:
     monkeypatch.setattr("app.ai.extraction_service.MealService", FakeMealService)
     settings = _settings(
@@ -213,6 +340,7 @@ def test_agent_runtime_stops_when_model_turn_limit_is_reached(monkeypatch) -> No
     )
 
     assert len(provider.payloads) == 3
-    assert result["tool_results"][-1]["reason"] == "loop_limit_reached"
+    assert all(result["tool_name"] != "agent_loop" for result in result["tool_results"])
     assert result["agent_trace"][-1]["event"] == "loop_limit_reached"
+    assert result["agent_trace"][-1]["reason"] == "max_model_turns"
     assert "步骤" in result["assistant_text"]

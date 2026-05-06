@@ -10,6 +10,11 @@ class PendingActionUpdateRequest(BaseModel):
     user_note: str | None = Field(default=None, max_length=2000)
 
 
+class PendingActionContinuationRequest(BaseModel):
+    continue_agent: bool = False
+    include_agent_trace: bool = False
+
+
 class PendingActionResponse(BaseModel):
     pending_action_id: str
     type: str

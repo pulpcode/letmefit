@@ -294,6 +294,8 @@ class ExtractionService:
     ) -> str | None:
         if tool_call.is_read_only_tool:
             return None
+        if context.get("input_origin") == "pending_action_observation":
+            return "record_tool_disallowed_for_pending_action_observation"
 
         grounding = tool_call.grounding
         if grounding is None:
@@ -692,16 +694,16 @@ class ExtractionService:
             if action_type == "create_meal_record":
                 return (
                     "我整理出一条餐食记录草稿，尚未保存为正式记录，"
-                    "请确认或修改后再保存。"
+                    "请确认或修改后再保存。确认后我会根据确认结果继续处理这轮剩余问题。"
                 )
             if action_type == "create_body_metric_record":
                 return (
                     "我整理出一条身体指标草稿，尚未保存为正式记录，"
-                    "请确认或修改后再保存。"
+                    "请确认或修改后再保存。确认后我会根据确认结果继续处理这轮剩余问题。"
                 )
         return (
             f"我整理出 {len(pending_actions)} 条记录草稿，尚未保存为正式记录，"
-            "请逐项确认或修改后再保存。"
+            "请逐项确认或修改后再保存。确认后我会根据确认结果继续处理这轮剩余问题。"
         )
 
     def _has_rejected_tool_call(self, tool_results: list[dict[str, Any]]) -> bool:

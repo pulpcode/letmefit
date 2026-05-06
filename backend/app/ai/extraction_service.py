@@ -1,18 +1,20 @@
+import json
 import logging
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.ai.commit_rules import decide_auto_commit
+from app.ai.commit_rules import CommitDecision, decide_auto_commit
 from app.ai.draft_normalizer import normalize_pending_action_draft
 from app.ai.providers import ExtractionProvider, get_extraction_provider
 from app.ai.types import (
-    ExtractionActionSpec,
     ExtractionInput,
     ExtractionProviderResult,
     ExtractionToolCall,
+    GroundingSource,
 )
 from app.auth.security import new_id, utc_now
 from app.core.config import Settings, get_settings
@@ -67,36 +69,73 @@ class ExtractionService:
                 context=context or {},
             )
         )
+        execution = self.execute_provider_result(
+            provider_result=provider_result,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            content=content,
+            context=context or {},
+        )
+        return self._result_response(
+            provider_result,
+            execution["pending_actions"],
+            execution["committed_records"],
+            execution["tool_results"],
+        )
+
+    def execute_provider_result(
+        self,
+        *,
+        provider_result: ExtractionProviderResult,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+        content: list[MessageContentItem],
+        context: dict | None = None,
+        prior_tool_results: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        context = context or {}
+        prior_tool_results = prior_tool_results or []
         tool_calls, tool_results = self._filter_tool_calls(
             provider_result.tool_calls,
             content=content,
+            context=context,
+            prior_tool_results=prior_tool_results,
             conversation_id=conversation_id,
             message_id=message_id,
         )
         if not tool_calls:
-            return self._result_response(provider_result, [], [], tool_results)
+            return {
+                "pending_actions": [],
+                "committed_records": [],
+                "tool_results": tool_results,
+            }
 
-        extraction = AgentExtraction(
-            id=new_id("ext"),
+        extraction = self._create_extraction_if_needed(
+            provider_result=provider_result,
             user_id=user_id,
             conversation_id=conversation_id,
             message_id=message_id,
-            input_types_json=self._input_types(content),
-            intent=provider_result.intent,
-            confidence=provider_result.confidence,
-            requires_confirmation=False,
-            raw_output_json=provider_result.raw_output,
-            warnings_json=provider_result.warnings,
-            status="succeeded",
-            created_at=utc_now(),
+            content=content,
+            tool_calls=tool_calls,
         )
-        self.db.add(extraction)
-        self.db.flush()
 
         pending_actions = []
         committed_records = []
         input_text = self._joined_text(content)
         for tool_call in tool_calls:
+            if tool_call.is_read_only_tool:
+                tool_results.append(
+                    self._execute_read_only_tool(
+                        tool_call=tool_call,
+                        user_id=user_id,
+                    )
+                )
+                continue
+
+            if not extraction:
+                continue
             action_spec = tool_call.to_action_spec()
             draft_payload = normalize_pending_action_draft(
                 action_spec.action_type,
@@ -105,16 +144,20 @@ class ExtractionService:
                 now=utc_now(),
             )
             confidence = self._action_confidence(action_spec, provider_result, draft_payload)
-            decision = decide_auto_commit(
-                action_type=action_spec.action_type,
-                draft_payload=draft_payload,
-                confidence=confidence,
-                warnings=action_spec.warnings,
-                provider_warnings=provider_result.warnings,
-                input_types=self._input_types(content),
-                input_text=input_text,
-                input_normalization=(context or {}).get("input_normalization"),
-            )
+            auto_commit_allowed = self._auto_commit_allowed(tool_call)
+            if auto_commit_allowed:
+                decision = decide_auto_commit(
+                    action_type=action_spec.action_type,
+                    draft_payload=draft_payload,
+                    confidence=confidence,
+                    warnings=action_spec.warnings,
+                    provider_warnings=provider_result.warnings,
+                    input_types=self._input_types(content),
+                    input_text=input_text,
+                    input_normalization=context.get("input_normalization"),
+                )
+            else:
+                decision = CommitDecision(False, "grounding_requires_confirmation")
             if decision.auto_commit:
                 try:
                     record = self._auto_commit_action(
@@ -159,22 +202,61 @@ class ExtractionService:
                 confidence=confidence,
                 action_type=action_spec.action_type,
                 draft_payload=draft_payload,
-                warnings=action_spec.warnings,
+                warnings=[
+                    *action_spec.warnings,
+                    *(
+                        [{"field": "grounding", "reason": decision.reason}]
+                        if not auto_commit_allowed
+                        else []
+                    ),
+                ],
             )
             pending_actions.append(action)
             tool_results.append(self._tool_result(tool_call, "pending_confirmation", action=action))
-        extraction.requires_confirmation = bool(pending_actions)
-        return self._result_response(
-            provider_result,
-            pending_actions,
-            committed_records,
-            tool_results,
+        if extraction:
+            extraction.requires_confirmation = bool(pending_actions)
+        return {
+            "pending_actions": pending_actions,
+            "committed_records": committed_records,
+            "tool_results": tool_results,
+        }
+
+    def _create_extraction_if_needed(
+        self,
+        *,
+        provider_result: ExtractionProviderResult,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+        content: list[MessageContentItem],
+        tool_calls: list[ExtractionToolCall],
+    ) -> AgentExtraction | None:
+        if not any(tool_call.is_record_tool for tool_call in tool_calls):
+            return None
+        extraction = AgentExtraction(
+            id=new_id("ext"),
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            input_types_json=self._input_types(content),
+            intent=provider_result.intent,
+            confidence=provider_result.confidence,
+            requires_confirmation=False,
+            raw_output_json=provider_result.raw_output,
+            warnings_json=provider_result.warnings,
+            status="succeeded",
+            created_at=utc_now(),
         )
+        self.db.add(extraction)
+        self.db.flush()
+        return extraction
 
     def _filter_tool_calls(
         self,
         tool_calls: list[ExtractionToolCall],
         content: list[MessageContentItem],
+        context: dict[str, Any],
+        prior_tool_results: list[dict[str, Any]],
         conversation_id: str,
         message_id: str,
     ) -> tuple[list[ExtractionToolCall], list[dict[str, Any]]]:
@@ -185,7 +267,12 @@ class ExtractionService:
         kept = []
         tool_results = []
         for tool_call in tool_calls:
-            drop_reason = self._tool_call_drop_reason(tool_call, input_text)
+            drop_reason = self._tool_call_drop_reason(
+                tool_call,
+                input_text=input_text,
+                context=context,
+                prior_tool_results=prior_tool_results,
+            )
             if drop_reason:
                 self._log_rejected_tool_call(
                     tool_call=tool_call,
@@ -202,19 +289,177 @@ class ExtractionService:
         self,
         tool_call: ExtractionToolCall,
         input_text: str,
+        context: dict[str, Any],
+        prior_tool_results: list[dict[str, Any]],
     ) -> str | None:
+        if tool_call.is_read_only_tool:
+            return None
+
         grounding = tool_call.grounding
         if grounding is None:
             return "grounding_missing"
-        if grounding.source != "user_current_turn":
-            return f"source={grounding.source}"
 
+        source = self._normalized_grounding_source(grounding.source)
+        if source == "model_inference":
+            return "source=model_inference"
         evidence_text = grounding.evidence_text.strip()
         if not evidence_text:
             return "evidence_text_empty"
+
+        if source in {"current_user_message", "normalized_media_text"}:
+            if evidence_text not in input_text:
+                return "evidence_not_in_current_message"
+            return None
+        if source == "recent_user_message":
+            if not self._evidence_in_recent_user_messages(evidence_text, context):
+                return "evidence_not_in_recent_user_messages"
+            return None
+        if source == "active_pending_action":
+            if not self._grounding_references_active_pending_action(grounding, context):
+                return "active_pending_action_not_found"
+            return None
+        if source == "tool_result":
+            if not self._grounding_references_tool_result(grounding, prior_tool_results):
+                return "tool_result_not_found"
+            return None
+        if source == "confirmed_record":
+            return "source=confirmed_record"
+        if source == "assistant_plan":
+            if not self._evidence_in_assistant_plan(evidence_text, context):
+                return "assistant_plan_evidence_not_found"
+            return None
         if evidence_text not in input_text:
             return "evidence_not_in_user_message"
         return None
+
+    def _normalized_grounding_source(self, source: GroundingSource) -> str:
+        if source == "user_current_turn":
+            return "current_user_message"
+        if source == "assistant_generated":
+            return "assistant_plan"
+        return str(source)
+
+    def _auto_commit_allowed(self, tool_call: ExtractionToolCall) -> bool:
+        if not tool_call.grounding:
+            return False
+        return self._normalized_grounding_source(tool_call.grounding.source) in {
+            "current_user_message",
+            "normalized_media_text",
+        }
+
+    def _execute_read_only_tool(
+        self,
+        *,
+        tool_call: ExtractionToolCall,
+        user_id: str,
+    ) -> dict[str, Any]:
+        if tool_call.name == "query_meal_records":
+            local_date = self._date_arg(tool_call.arguments.get("local_date"))
+            result = MealService(self.db).list_meals(user_id, local_date=local_date)
+            return self._tool_result(tool_call, "succeeded", data=result)
+        if tool_call.name == "query_body_metric_records":
+            date_from = self._date_arg(tool_call.arguments.get("date_from"))
+            date_to = self._date_arg(tool_call.arguments.get("date_to"))
+            result = BodyMetricService(self.db).list_body_metrics(
+                user_id,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            return self._tool_result(tool_call, "succeeded", data=result)
+        return self._tool_result(tool_call, "rejected", reason="unsupported_read_only_tool")
+
+    def _date_arg(self, value: Any) -> date | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            try:
+                return date.fromisoformat(value[:10])
+            except ValueError:
+                return None
+        return None
+
+    def _evidence_in_recent_user_messages(
+        self,
+        evidence_text: str,
+        context: dict[str, Any],
+    ) -> bool:
+        for message in self._context_messages(context):
+            if message.get("role") != "user":
+                continue
+            if evidence_text in self._message_text(message):
+                return True
+        return False
+
+    def _grounding_references_active_pending_action(
+        self,
+        grounding,
+        context: dict[str, Any],
+    ) -> bool:
+        actions = context.get("active_pending_actions")
+        if not isinstance(actions, list):
+            return False
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            if grounding.source_id and grounding.source_id == action.get("pending_action_id"):
+                return True
+            if grounding.evidence_text and grounding.evidence_text in self._json_text(action):
+                return True
+        return False
+
+    def _grounding_references_tool_result(
+        self,
+        grounding,
+        prior_tool_results: list[dict[str, Any]],
+    ) -> bool:
+        for result in prior_tool_results:
+            if grounding.source_id and grounding.source_id in {
+                str(result.get("tool_name") or ""),
+                str(result.get("record_id") or ""),
+                str(result.get("pending_action_id") or ""),
+            }:
+                return True
+            if grounding.evidence_text and grounding.evidence_text in self._json_text(result):
+                return True
+        return False
+
+    def _evidence_in_assistant_plan(
+        self,
+        evidence_text: str,
+        context: dict[str, Any],
+    ) -> bool:
+        active_offer = context.get("ephemeral_state", {}).get("active_offer")
+        if isinstance(active_offer, dict) and evidence_text in self._json_text(active_offer):
+            return True
+        for message in self._context_messages(context):
+            if message.get("role") != "assistant":
+                continue
+            if evidence_text in self._message_text(message):
+                return True
+        return False
+
+    def _context_messages(self, context: dict[str, Any]) -> list[dict[str, Any]]:
+        messages = []
+        for key in ("short_term_messages", "recent_messages"):
+            value = context.get(key)
+            if isinstance(value, list):
+                messages.extend(item for item in value if isinstance(item, dict))
+        return messages
+
+    def _message_text(self, message: dict[str, Any]) -> str:
+        content = message.get("content")
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    parts.append(str(item.get("text") or item.get("event_type") or ""))
+            return " ".join(part for part in parts if part)
+        return str(message.get("content_preview") or "")
+
+    def _json_text(self, value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, default=str)
 
     def _log_rejected_tool_call(
         self,
@@ -242,6 +487,7 @@ class ExtractionService:
         reason: str | None = None,
         action: AgentPendingAction | None = None,
         record: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         result = {
             "tool_name": tool_call.name,
@@ -255,6 +501,8 @@ class ExtractionService:
         if record is not None:
             result["record_type"] = record["type"]
             result["record_id"] = record["record_id"]
+        if data is not None:
+            result["data"] = data
         return result
 
     def _create_pending_action(

@@ -31,6 +31,7 @@ class ConversationListResponse(BaseModel):
 class MessageCreateRequest(BaseModel):
     content: list[MessageContentItem] = Field(min_length=1, max_length=20)
     include_debug_context: bool = False
+    include_agent_trace: bool = False
 
 
 class ConversationMessageResponse(BaseModel):
@@ -56,4 +57,5 @@ class MessageSendResponse(BaseModel):
     pending_actions: list[dict]
     committed_records: list[dict] = Field(default_factory=list)
     tool_results: list[dict] = Field(default_factory=list)
+    agent_trace: list[dict] | None = None
     debug_context: dict[str, Any] | None = None

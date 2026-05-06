@@ -2,48 +2,60 @@
 
 ## Summary
 
-当前实现已经把“模型回答”和“记录写入动作”拆成两个内部通道：
-
-```text
-assistant_text -> 用于普通对话、解释、建议和规划
-tool_calls     -> 用于请求后端执行记录类工具
-```
-
-这不是完整 agent loop。当前仍是单次 LLM 调用：模型一次性输出 JSON，后端解析其中的 `tool_calls`，执行工具校验和写入决策，然后由后端根据真实执行结果生成最终状态文案。
-
-外部 REST API 仍保持兼容，`POST /conversations/{id}/messages` 继续返回 `pending_actions` 和 `committed_records`，并新增 `tool_results` 用于调试。
-
-## Current Flow
+当前模型定位是“健身管理对话助手 + 结构化记录工具调用者”。后端在一次请求内运行 bounded ReAct loop：
 
 ```text
 User message
 -> InputNormalizer
 -> ConversationContextBuilder
--> ExtractionProvider
-   -> assistant_text
-   -> tool_calls[]
-   -> dialogue_state_patch
--> ToolGuard
--> ToolExecutor
--> ResponseComposer
+-> AgentRuntime
+   -> model decision
+   -> optional backend tools
+   -> optional model final answer
 -> ConversationMessage + API response
 ```
 
-关键点：
+简单问题通常一轮模型决策结束并直接返回 `assistant_text`。复杂问题可以先调用工具，后端把 `tool_results` 放回上下文后再让模型生成最终回答。信息不足时，模型应直接用 `assistant_text` 追问用户，`tool_calls=[]`，后端不会创建草稿。
 
-- `ExtractionProvider` 只负责结构化输出，不直接写数据库。
-- `tool_calls` 是模型请求后端执行的工具调用，不是执行结果。
-- `ToolGuard` 是写入动作的强制安全边界。
-- `ToolExecutor` 根据后端规则创建确认卡或自动写入正式记录。
-- `ResponseComposer` 根据真实 outcome 生成“已保存 / 待确认 / 未保存”状态文案。
+外部 REST API 保持兼容：`POST /conversations/{id}/messages` 仍返回 `pending_actions`、`committed_records` 和 `tool_results`。调试时可通过请求字段 `include_agent_trace=true` 额外返回脱敏 `agent_trace`。
+
+## Loop Limits
+
+第一版 loop 只在单次请求内运行，不持久化中间状态，也不支持中断恢复。默认限制：
+
+- 最多 3 次模型决策。
+- 最多 2 轮工具执行。
+- 每轮最多 3 个工具调用。
+- 单次请求最多 6 个工具调用。
+- 单次 loop 有总超时保护。
+
+触发限制后，后端停止执行新的工具调用，返回受控降级回答，并在 trace 中加入 `loop_limit_reached`。
 
 ## Available Tools
 
-当前只支持两个记录类工具：
+默认上下文已经携带 `profile`、`recent_records`、`active_pending_actions`，因此不设计“读取 profile / recent_records”的必调工具。
+
+记录工具：
 
 ```text
 propose_meal_record
 propose_body_metric_record
+```
+
+只读查询工具：
+
+```text
+query_meal_records
+query_body_metric_records
+```
+
+后续可扩展：
+
+```text
+nutrition_lookup
+nutrition_estimate
+nutrition_calculate
+record_trend_stats
 ```
 
 ### `propose_meal_record`
@@ -60,7 +72,7 @@ propose_body_metric_record
     "items": []
   },
   "grounding": {
-    "source": "user_current_turn",
+    "source": "current_user_message",
     "evidence_text": "我晚餐吃了120g鸡胸肉"
   }
 }
@@ -79,42 +91,66 @@ propose_body_metric_record
     "weight_kg": 72.4
   },
   "grounding": {
-    "source": "user_current_turn",
+    "source": "current_user_message",
     "evidence_text": "今天体重72.4公斤"
   }
 }
 ```
 
-## Guard Rules
+### `query_meal_records`
 
-每个记录类 tool call 必须带 grounding：
+查询已确认餐食记录。优先使用默认上下文里的 `recent_records`；只有用户询问的日期或范围超出默认上下文时再调用。
 
 ```json
 {
-  "source": "user_current_turn | assistant_generated",
-  "evidence_text": "string"
+  "name": "query_meal_records",
+  "arguments": {
+    "local_date": "2026-05-06"
+  }
 }
 ```
 
-后端只接受满足以下条件的 tool call：
+### `query_body_metric_records`
 
-- `grounding` 存在。
-- `grounding.source == "user_current_turn"`。
-- `grounding.evidence_text` 非空。
-- `grounding.evidence_text` 是当前用户消息文本的原文子串。
+查询已确认身体指标记录：
 
-以下情况会被拒绝：
-
-- 缺少 grounding。
-- `source=assistant_generated`。
-- `evidence_text` 为空。
-- `evidence_text` 不在当前用户消息中。
-
-拒绝不会创建确认卡，也不会写正式记录。后端会记录日志：
-
-```text
-ai_tool_call_rejected tool_name=... action_type=... reason=... conversation_id=... message_id=...
+```json
+{
+  "name": "query_body_metric_records",
+  "arguments": {
+    "date_from": "2026-05-01",
+    "date_to": "2026-05-06"
+  }
+}
 ```
+
+## Grounding Levels
+
+每个记录类 tool call 必须带 grounding。只读工具不需要 grounding。
+
+```json
+{
+  "source": "current_user_message",
+  "source_id": "optional",
+  "evidence_text": "string",
+  "confidence": 0.9
+}
+```
+
+分级规则：
+
+- `current_user_message` / `normalized_media_text`: 可进入后端自动保存判断。
+- `recent_user_message` / `active_pending_action` / `tool_result`: 可创建确认卡，默认不能自动保存。
+- `assistant_plan`: 最多创建确认卡，不能自动保存。
+- `confirmed_record`: 只能用于回答和总结，不能直接生成新记录。
+- `model_inference`: 不能写记录，只能回答或追问。
+
+兼容旧字段：
+
+- `user_current_turn` 等同 `current_user_message`。
+- `assistant_generated` 等同 `assistant_plan`。
+
+后端会校验 `evidence_text` 是否能在对应来源中找到。校验失败的 tool call 会被拒绝，不创建确认卡，也不写正式记录。
 
 ## Execution Results
 
@@ -131,23 +167,51 @@ ai_tool_call_rejected tool_name=... action_type=... reason=... conversation_id=.
 ]
 ```
 
-`status` 当前可能为：
-
-```text
-rejected
-pending_confirmation
-committed
-```
-
-含义：
+记录工具状态：
 
 - `rejected`: guard 拒绝，未创建确认卡，未保存记录。
 - `pending_confirmation`: 已创建确认卡，等待用户确认或修改。
 - `committed`: 后端规则判定可自动写入，已保存正式记录。
 
+只读工具状态：
+
+- `succeeded`: 查询成功，结果放在 `data` 中。
+- `rejected`: 参数或工具不支持。
+
+## Agent Trace
+
+`include_agent_trace=true` 时，响应会返回脱敏执行轨迹。trace 不包含模型隐含思维链，不包含原始 provider 输出。
+
+事件类型：
+
+```text
+agent_started
+model_decision
+tool_call_started
+tool_result
+clarifying_question
+final_answer
+loop_limit_reached
+```
+
+示例：
+
+```json
+[
+  {"event": "agent_started", "max_model_turns": 3, "max_tool_rounds": 2},
+  {"event": "model_decision", "model_turn": 1, "decision": "tool_calls"},
+  {"event": "tool_call_started", "tool_round": 1, "tool_name": "query_meal_records"},
+  {"event": "tool_result", "tool_round": 1, "tool_name": "query_meal_records", "status": "succeeded"},
+  {"event": "model_decision", "model_turn": 2, "decision": "final_answer"},
+  {"event": "final_answer", "model_turn": 2}
+]
+```
+
+后续如需实时展示过程，可新增 `POST /conversations/{id}/messages/stream`，返回 chunked NDJSON 或 SSE-like event stream。当前普通 JSON 接口继续作为兼容 fallback。
+
 ## Response Composition
 
-模型不能决定“是否已保存”。这类状态只以后端真实执行结果为准。
+模型不能决定“是否已保存”。保存、确认卡、拒绝状态只以后端真实执行结果为准。
 
 后端响应文案规则：
 
@@ -156,83 +220,13 @@ committed
 - tool call 被拒绝且模型声称“已保存/已记录”：后端覆盖为“尚未保存”安全文案。
 - 没有工具执行结果且没有保存声明：保留模型普通回答。
 
-这样可以避免模型说“已保存”，但后端实际没有保存的状态错配。
-
-## Compatibility
-
-为了平滑迁移，`ExtractionOutput` 仍兼容旧字段：
-
-```json
-{
-  "pending_actions": []
-}
-```
-
-后端会把旧 `pending_actions` 映射为内部 `tool_calls`。新 provider 和 prompt 应优先输出 `tool_calls`。
-
-外部 API 暂不破坏兼容：
-
-- 仍返回 `pending_actions` 给客户端展示确认卡。
-- 仍返回 `committed_records` 表示自动写入结果。
-- 新增 `tool_results` 供调试和灰度观察。
-
-## Is There an Agent Loop?
-
-当前没有完整 agent loop。
-
-当前不是：
-
-```text
-LLM -> tool call -> backend tool result -> LLM final answer
-```
-
-当前是：
-
-```text
-LLM -> tool_calls JSON -> backend executes tools -> backend composes final response
-```
-
-也就是说，工具执行后不会再发起第二次 LLM 调用。后端直接根据工具执行结果生成状态文案。
-
-这个选择是有意的：
-
-- 先解决写记录和普通回答混在一起的问题。
-- 先保证保存状态由后端权威控制。
-- 避免引入多步调用的延迟、失败恢复和状态管理复杂度。
-
-后续如果需要更强的智能编排，可以演进为真正 agent loop：
-
-```text
-LLM decides tool call
--> backend executes tool
--> tool result appended to messages
--> LLM generates final answer from tool result
-```
-
-但即使进入 agent loop，记录类工具仍必须经过同样的 ToolGuard。
-
 ## Known Limits
 
-当前版本暂不支持把助手上一轮规划直接转成记录：
+当前版本暂不支持把助手上一轮规划直接自动保存为正式记录：
 
 ```text
 Assistant: 建议晚餐吃清蒸鱼、西兰花、杂粮饭。
 User: 可以，就这么记录吧。
 ```
 
-因为这些食物不在当前用户消息原文中，`grounding.source=user_current_turn` 无法通过。短期内这是刻意保守的取舍：优先防止助手建议被误写成用户事实。
-
-后续可单独设计：
-
-```text
-propose_meal_record_from_adopted_plan
-```
-
-这类工具需要额外校验：
-
-- 被采用的 assistant message id。
-- offer 是否仍有效。
-- draft 食物是否来自该 assistant plan。
-- 用户当前消息是否明确要求记录。
-- 只能创建确认卡，不能自动写入。
-
+如果产品需要支持该能力，应新增专门工具，例如 `propose_meal_record_from_adopted_plan`。这类工具只能生成确认卡，不能自动保存，并且必须校验被采用的 assistant message、offer 有效性、用户当前消息是否明确要求记录。

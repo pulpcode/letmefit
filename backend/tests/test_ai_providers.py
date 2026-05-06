@@ -215,21 +215,37 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     )
     assert prompt_json["context_contract"]["authority_order"][:4] == [
         "message_content",
-        "ephemeral_state.active_offer",
         "profile",
         "recent_records",
+        "active_pending_actions",
     ]
+    assert "当前用户意图的最高优先级来源" in "".join(
+        prompt_json["context_contract"]["rules"]
+    )
     assert "只有 active_pending_actions" in "".join(prompt_json["context_contract"]["rules"])
     assert "优先读取 recent_records" in "".join(prompt_json["context_contract"]["rules"])
+    assert "不是正式事实来源" in "".join(prompt_json["context_contract"]["rules"])
     assert "active_offer 在本轮结束后会失效" in "".join(
         prompt_json["context_contract"]["rules"]
     )
     assert "记录类 tool_calls 必须带 grounding" in "".join(
         prompt_json["context_contract"]["rules"]
     )
+    assert "ReAct loop" in "".join(prompt_json["context_contract"]["rules"])
+    assert "只读工具" in "".join(prompt_json["context_contract"]["rules"])
     system_prompt = client.completions.calls[0]["messages"][0]["content"]
-    assert "每个 tool_call 必须包含 grounding 字段" in system_prompt
-    assert "assistant_generated 不能作为写入记录或确认卡依据" in system_prompt
+    assert "健身管理对话助手" in system_prompt
+    assert "结构化记录工具调用者" in system_prompt
+    assert "健身管理信息提取器" not in system_prompt
+    assert "你必须只输出 JSON 对象" in system_prompt
+    assert "普通健身问题" in system_prompt
+    assert "只有当需要把用户当前消息中的事实变成候选记录时" in system_prompt
+    assert "有上限的 ReAct loop" in system_prompt
+    assert "query_meal_records" in system_prompt
+    assert "记录类 tool_call 必须包含 grounding 字段" in system_prompt
+    assert "assistant_generated 等同 assistant_plan" in system_prompt
+    assert "model_inference 不能写记录" in system_prompt
+    assert "needs_clarification" in system_prompt
     assert "dialogue_state_patch 不能包含 profile" in "".join(
         prompt_json["context_contract"]["rules"]
     )

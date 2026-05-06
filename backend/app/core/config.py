@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     ai_max_retries: int = 2
     ai_schema_repair_retries: int = 1
     ai_temperature: float = 0.1
+    agent_max_model_turns: int = 3
+    agent_max_tool_rounds: int = 2
+    agent_max_tool_calls_per_round: int = 3
+    agent_max_total_tool_calls: int = 6
+    agent_loop_timeout_seconds: int = 25
     conversation_context_short_term_full_turns: int = 4
     conversation_context_recent_messages: int = 8
     conversation_summary_trigger_messages: int = 16

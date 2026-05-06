@@ -2,7 +2,7 @@
 
 ## Purpose
 
-LLM output is only used to create backend-validated candidate record actions. It must not write formal records directly.
+LLM output is used by the backend AgentRuntime to answer fitness-management questions, ask clarifying questions, and request backend tools. It must not write formal records directly.
 
 The backend stores LLM output in `agent_extractions`, then applies backend commit rules. Clear low-risk actions may be committed automatically; ambiguous or low-confidence actions become `agent_pending_actions` and require user confirmation.
 
@@ -65,8 +65,8 @@ Fields:
 - `confidence`: 0-1 model confidence
 - `warnings`: low-confidence or missing-field warnings
 - `dialogue_state_patch`: optional one-turn dialogue-state hint; does not write formal facts
-- `tool_calls`: requested backend tools; backend may auto-commit clear record tools or create pending actions
-- `tool_calls[].grounding`: required evidence metadata for every record tool call
+- `tool_calls`: requested backend tools; backend may query read-only records, auto-commit clear record tools, or create pending actions
+- `tool_calls[].grounding`: required evidence metadata for every record tool call; read-only query tools do not need grounding
 
 ## Dialogue State Patch
 
@@ -96,7 +96,7 @@ Rules:
 - It must not contain profile, records, pending actions, draft payloads, or formal facts.
 - The backend treats it as a one-user-turn token and clears it after the next user message.
 
-## Record Tool Calls
+## Tool Calls
 
 Supported V1 record tools:
 
@@ -105,20 +105,25 @@ propose_meal_record
 propose_body_metric_record
 ```
 
-Planned but not yet committed through LLM:
+Supported V1 read-only query tools:
 
 ```text
-generate_daily_summary
+query_meal_records
+query_body_metric_records
 ```
 
-## Pending Action Grounding
+Planned future tools may include nutrition database lookup, nutrition estimation/calculation, and trend statistics.
+
+## Grounding
 
 Every record tool call must include:
 
 ```json
 {
   "grounding": {
-    "source": "user_current_turn",
+    "source": "current_user_message",
+    "source_id": null,
+    "confidence": 0.9,
     "evidence_text": "我晚餐吃了120g鸡胸肉"
   }
 }
@@ -126,15 +131,46 @@ Every record tool call must include:
 
 Allowed values:
 
-- `user_current_turn`: the action is grounded in the current user message.
-- `assistant_generated`: the action content came from assistant planning, recommendation, example, or estimation.
+- `current_user_message`: grounded in the current user message.
+- `normalized_media_text`: grounded in trusted ASR transcript or image description.
+- `recent_user_message`: grounded in recent user conversation history.
+- `active_pending_action`: grounded in an unresolved pending action from backend context.
+- `tool_result`: grounded in a result returned earlier in the same AgentRuntime loop.
+- `confirmed_record`: grounded in official records; can be used for answering and summarization, not for creating new records.
+- `assistant_plan`: grounded in assistant planning, recommendation, example, or estimation.
+- `model_inference`: model inference without source evidence.
 
 Rules:
 
-- `evidence_text` must be an exact substring from the current user message.
-- The backend only executes `source=user_current_turn` record tools whose `evidence_text` is present in the current user message.
-- `assistant_generated` tool calls are rejected by the backend and must not create confirmation cards.
+- `evidence_text` must be a verifiable snippet from the declared source.
+- `current_user_message` and `normalized_media_text` are the only sources that may enter auto-commit rules.
+- `recent_user_message`, `active_pending_action`, `tool_result`, and `assistant_plan` may create confirmation cards, but must not auto-save.
+- `confirmed_record` and `model_inference` must not create new records.
 - Planning, recommendation, and advice responses must use `tool_calls=[]`.
+- Legacy `user_current_turn` is accepted as `current_user_message`; legacy `assistant_generated` is accepted as `assistant_plan`.
+
+## Read-Only Query Tools
+
+Use default context first. `profile`, `recent_records`, and `active_pending_actions` are already included in `conversation_context`, so the model must not call tools just to reread them.
+
+```json
+{
+  "name": "query_meal_records",
+  "arguments": {
+    "local_date": "2026-05-06"
+  }
+}
+```
+
+```json
+{
+  "name": "query_body_metric_records",
+  "arguments": {
+    "date_from": "2026-05-01",
+    "date_to": "2026-05-06"
+  }
+}
+```
 
 ## Meal Record Draft
 
@@ -162,7 +198,7 @@ Rules:
     "confidence": 0.78
   },
   "grounding": {
-    "source": "user_current_turn",
+    "source": "current_user_message",
     "evidence_text": "我午餐吃了约120g鸡胸肉"
   },
   "warnings": []
@@ -195,7 +231,7 @@ Rules:
     "confidence": 0.82
   },
   "grounding": {
-    "source": "user_current_turn",
+    "source": "current_user_message",
     "evidence_text": "今天体重72.4kg，体脂18.6%"
   },
   "warnings": []

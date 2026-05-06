@@ -640,6 +640,7 @@ Agent 接口可以返回自然语言回复、自动写入的正式记录，也�
 ```json
 {
   "include_debug_context": false,
+  "include_agent_trace": true,
   "content": [
     {
       "type": "text",
@@ -662,6 +663,7 @@ Agent 接口可以返回自然语言回复、自动写入的正式记录，也�
 字段说明：
 
 - `include_debug_context` 默认为 `false`。仅用于服务器联调或静态测试页；设为 `true` 时，响应会附带本次传给 LLM 的调试上下文预览。
+- `include_agent_trace` 默认为 `false`。设为 `true` 时，响应会附带脱敏的 agent 执行轨迹；不包含模型隐含思维链或原始 provider 输出。
 
 响应：
 
@@ -680,6 +682,36 @@ Agent 接口可以返回自然语言回复、自动写入的正式记录，也�
         "action_type": "create_meal_record",
         "status": "pending_confirmation",
         "pending_action_id": "pa_..."
+      }
+    ],
+    "agent_trace": [
+      {
+        "event": "agent_started",
+        "max_model_turns": 3,
+        "max_tool_rounds": 2
+      },
+      {
+        "event": "model_decision",
+        "model_turn": 1,
+        "decision": "tool_calls",
+        "tool_names": ["propose_meal_record"],
+        "intent": "fitness_record"
+      },
+      {
+        "event": "tool_result",
+        "tool_round": 1,
+        "tool_name": "propose_meal_record",
+        "status": "pending_confirmation"
+      },
+      {
+        "event": "model_decision",
+        "model_turn": 2,
+        "decision": "final_answer",
+        "intent": "fitness_record"
+      },
+      {
+        "event": "final_answer",
+        "model_turn": 2
       }
     ],
     "pending_actions": [
@@ -704,6 +736,8 @@ Agent 接口可以返回自然语言回复、自动写入的正式记录，也�
   "request_id": "req_..."
 }
 ```
+
+未请求 `include_agent_trace` 时，响应不会包含 `agent_trace` 字段，以保持旧客户端兼容。
 
 明确输入可能被自动保存，此时 `requires_review=false`、`pending_actions=[]`，并返回 `committed_records`：
 

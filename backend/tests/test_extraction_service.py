@@ -5,9 +5,9 @@ from app.ai.extraction_service import ExtractionService
 from app.ai.providers.base import ExtractionProvider
 from app.ai.types import (
     ActionGrounding,
-    ExtractionToolCall,
     ExtractionInput,
     ExtractionProviderResult,
+    ExtractionToolCall,
 )
 from app.core.config import Settings
 from app.schemas.conversation import MessageContentItem
@@ -56,6 +56,23 @@ class FakeBodyMetricService:
             "water_percentage": None,
             "confidence": 0.9,
             "source_pending_action_id": None,
+        }
+
+
+class FakeMealQueryService:
+    def __init__(self, db) -> None:
+        self.db = db
+
+    def list_meals(self, user_id, local_date=None):
+        return {
+            "meals": [
+                {
+                    "id": "meal_query",
+                    "local_date": str(local_date),
+                    "meal_type": "lunch",
+                    "items": [{"name": "鸡胸肉"}],
+                }
+            ]
         }
 
 
@@ -194,7 +211,7 @@ def test_extraction_service_normalizes_backfilled_meal_time(monkeypatch) -> None
     )
 
 
-def test_extraction_service_drops_assistant_generated_action(caplog) -> None:
+def test_extraction_service_drops_assistant_generated_action_without_plan_evidence(caplog) -> None:
     provider = FakeProvider(
         ExtractionProviderResult(
             assistant_text=(
@@ -238,7 +255,7 @@ def test_extraction_service_drops_assistant_generated_action(caplog) -> None:
     assert result["requires_review"] is False
     assert db.added == []
     assert "ai_tool_call_rejected" in caplog.text
-    assert "source=assistant_generated" in caplog.text
+    assert "assistant_plan_evidence_not_found" in caplog.text
 
 
 def test_extraction_service_rewrites_false_saved_text_after_rejected_tool() -> None:
@@ -440,3 +457,269 @@ def test_extraction_service_keeps_valid_grounding() -> None:
 
     assert result["requires_review"] is True
     assert result["pending_actions"][0]["type"] == "create_meal_record"
+
+
+def test_extraction_service_recent_user_message_creates_confirmation_card_only() -> None:
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我根据上一条消息整理成身体指标草稿，请确认。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.95"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_body_metric_record",
+                    confidence=Decimal("0.95"),
+                    arguments={
+                        "recorded_at": "2026-05-05T08:00:00+08:00",
+                        "source_type": "text",
+                        "weight_kg": 72.4,
+                    },
+                    grounding=ActionGrounding(
+                        source="recent_user_message",
+                        evidence_text="今天体重72.4公斤",
+                    ),
+                    warnings=[],
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="就按上一条记录")],
+        context={
+            "recent_messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "今天体重72.4公斤"}],
+                }
+            ]
+        },
+    )
+
+    assert result["committed_records"] == []
+    assert result["requires_review"] is True
+    assert result["pending_actions"][0]["type"] == "create_body_metric_record"
+    assert result["pending_actions"][0]["warnings"][-1]["reason"] == (
+        "grounding_requires_confirmation"
+    )
+
+
+def test_extraction_service_tool_result_creates_confirmation_card_only() -> None:
+    provider_result = ExtractionProviderResult(
+        assistant_text="我根据查询结果整理成餐食草稿，请确认。",
+        intent="fitness_record",
+        requires_review=True,
+        confidence=Decimal("0.82"),
+        tool_calls=[
+            ExtractionToolCall(
+                name="propose_meal_record",
+                confidence=Decimal("0.82"),
+                arguments={
+                    "recorded_at": "2026-05-06T12:30:00+08:00",
+                    "source_type": "manual",
+                    "meal_type": "lunch",
+                    "items": [{"name": "鸡胸肉", "portion_text": "120g"}],
+                },
+                grounding=ActionGrounding(
+                    source="tool_result",
+                    source_id="query_meal_records",
+                    evidence_text="鸡胸肉",
+                ),
+                warnings=[],
+            )
+        ],
+    )
+    service = ExtractionService(
+        FakeDb(),
+        settings=_settings(),
+        provider=FakeProvider(provider_result),
+    )
+
+    result = service.execute_provider_result(
+        provider_result=provider_result,
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="把查询到的午餐作为今天的草稿")],
+        context={},
+        prior_tool_results=[
+            {
+                "tool_name": "query_meal_records",
+                "status": "succeeded",
+                "data": {"meals": [{"id": "meal_old", "items": [{"name": "鸡胸肉"}]}]},
+            }
+        ],
+    )
+
+    assert result["committed_records"] == []
+    assert result["pending_actions"][0].action_type == "create_meal_record"
+    assert result["tool_results"][0]["status"] == "pending_confirmation"
+
+
+def test_extraction_service_assistant_plan_creates_confirmation_card_only() -> None:
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我把上一轮方案整理为草稿，请确认。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.82"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
+                    confidence=Decimal("0.82"),
+                    arguments={
+                        "recorded_at": "2026-05-06T19:00:00+08:00",
+                        "source_type": "manual",
+                        "meal_type": "dinner",
+                        "items": [{"name": "清蒸鱼", "portion_text": "120g"}],
+                    },
+                    grounding=ActionGrounding(
+                        source="assistant_plan",
+                        evidence_text="清蒸鱼",
+                    ),
+                    warnings=[],
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="可以，就这么记录吧")],
+        context={
+            "recent_messages": [
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "建议晚餐吃清蒸鱼和西兰花。"}],
+                }
+            ]
+        },
+    )
+
+    assert result["committed_records"] == []
+    assert result["pending_actions"][0]["type"] == "create_meal_record"
+    assert result["pending_actions"][0]["warnings"][-1]["reason"] == (
+        "grounding_requires_confirmation"
+    )
+
+
+def test_extraction_service_rejects_model_inference_record() -> None:
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我猜测你可能吃了晚餐。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.50"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
+                    confidence=Decimal("0.50"),
+                    arguments={
+                        "recorded_at": "2026-05-06T19:00:00+08:00",
+                        "source_type": "manual",
+                        "meal_type": "dinner",
+                        "items": [{"name": "晚餐"}],
+                    },
+                    grounding=ActionGrounding(
+                        source="model_inference",
+                        evidence_text="可能吃了晚餐",
+                    ),
+                    warnings=[],
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="我有点饿")],
+        context={},
+    )
+
+    assert result["pending_actions"] == []
+    assert result["tool_results"][0]["status"] == "rejected"
+    assert result["tool_results"][0]["reason"] == "source=model_inference"
+
+
+def test_extraction_service_rejects_confirmed_record_as_new_record_source() -> None:
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我不会把正式记录直接复制成新记录。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.70"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_meal_record",
+                    confidence=Decimal("0.70"),
+                    arguments={
+                        "recorded_at": "2026-05-06T12:30:00+08:00",
+                        "source_type": "manual",
+                        "meal_type": "lunch",
+                        "items": [{"name": "鸡胸肉"}],
+                    },
+                    grounding=ActionGrounding(
+                        source="confirmed_record",
+                        source_id="meal_1",
+                        evidence_text="鸡胸肉",
+                    ),
+                    warnings=[],
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="照昨天午餐再记一次")],
+        context={"recent_records": {"meals": [{"id": "meal_1", "items": [{"name": "鸡胸肉"}]}]}},
+    )
+
+    assert result["pending_actions"] == []
+    assert result["tool_results"][0]["reason"] == "source=confirmed_record"
+
+
+def test_extraction_service_executes_read_only_meal_query_tool(monkeypatch) -> None:
+    monkeypatch.setattr("app.ai.extraction_service.MealService", FakeMealQueryService)
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我先查询今天的餐食记录。",
+            intent="answer_fitness_question",
+            requires_review=True,
+            confidence=Decimal("0.80"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="query_meal_records",
+                    arguments={"local_date": "2026-05-06"},
+                    confidence=Decimal("0.80"),
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="今天吃了什么？")],
+        context={},
+    )
+
+    assert result["pending_actions"] == []
+    assert result["tool_results"][0]["status"] == "succeeded"
+    assert result["tool_results"][0]["data"]["meals"][0]["items"][0]["name"] == "鸡胸肉"

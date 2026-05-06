@@ -12,6 +12,7 @@ class FakeConversationService:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
         self.debug_flags: list[bool] = []
+        self.agent_trace_flags: list[bool] = []
 
     def create_conversation(self, user_id: str, payload: ConversationCreateRequest) -> dict:
         self.calls.append(("create", user_id, payload.title))
@@ -32,6 +33,7 @@ class FakeConversationService:
     ) -> dict:
         self.calls.append(("send", user_id, conversation_id, payload.content[0].type))
         self.debug_flags.append(payload.include_debug_context)
+        self.agent_trace_flags.append(payload.include_agent_trace)
         response = {
             "message_id": "msg_user",
             "assistant_message_id": "msg_assistant",
@@ -59,6 +61,12 @@ class FakeConversationService:
                     "conversation_context": {"input_normalization": {"media": []}},
                 },
             }
+        if payload.include_agent_trace:
+            response["agent_trace"] = [
+                {"event": "agent_started"},
+                {"event": "model_decision", "decision": "final_answer"},
+                {"event": "final_answer"},
+            ]
         return response
 
     def list_messages(self, user_id: str, conversation_id: str) -> dict:
@@ -165,8 +173,10 @@ def test_send_message_returns_pending_actions() -> None:
     assert body["data"]["requires_review"] is True
     assert body["data"]["pending_actions"][0]["pending_action_id"] == "pa_test"
     assert "debug_context" not in body["data"]
+    assert "agent_trace" not in body["data"]
     assert service.calls[0] == ("send", "user_test", "conv_test", "text")
     assert service.debug_flags == [False]
+    assert service.agent_trace_flags == [False]
 
 
 def test_send_message_can_request_debug_context() -> None:
@@ -189,6 +199,25 @@ def test_send_message_can_request_debug_context() -> None:
         "input_normalization": {"media": []}
     }
     assert service.debug_flags == [True]
+
+
+def test_send_message_can_request_agent_trace() -> None:
+    service = FakeConversationService()
+    client = TestClient(_authorized_app(service))
+
+    response = client.post(
+        "/v1/conversations/conv_test/messages",
+        json={
+            "content": [{"type": "text", "text": "今天吃了什么？"}],
+            "include_agent_trace": True,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["agent_trace"][0]["event"] == "agent_started"
+    assert data["agent_trace"][-1]["event"] == "final_answer"
+    assert service.agent_trace_flags == [True]
 
 
 def test_list_messages_and_pending_actions_use_conversation_id() -> None:

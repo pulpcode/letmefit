@@ -23,7 +23,7 @@ MySQL 驱动：PyMySQL
 媒体存储：本地开发/测试可使用客户端本地或服务端本地存储，生产建议 S3 兼容对象存储
 API 文档：OpenAPI 自动文档 + docs/backend-api-v1.md
 首个客户端：微信小程序，基于 Figma Make 原型实现
-Agent 框架：V1 自研轻量编排，暂不引入 LangChain/LangGraph/Deep Agents
+Agent 框架：V1 自研 bounded ReAct loop，暂不引入 LangChain/LangGraph/Deep Agents
 ```
 
 ## 2. 开发顺序
@@ -271,15 +271,16 @@ V1 暂不推荐直接引入 LangChain、LangGraph 或 Deep Agents 作为核心�
 
 原因：
 
-- 当前 Agent 流程较短，主要是输入归一化、意图识别、结构化抽取、规则校验和对话式 Review/Edit 确认
+- 当前 Agent 流程仍限定在一次请求内，主要是输入归一化、上下文组装、少量模型决策、受控工具执行、规则校验和对话式 Review/Edit 确认
 - LangGraph 更适合长任务、状态持久化、人类审批、多步骤工具链和复杂 Agent 编排
 - Deep Agents 更适合研究、编码、长周期规划、多子代理等复杂任务
 - 过早引入会增加依赖、状态管理、调试和安全审计成本
 
-V1 先自研轻量编排层：
+V1 先自研轻量 bounded loop：
 
 ```text
-InputNormalizer -> IntentRouter -> ExtractionService -> RuleEngine -> ResponseComposer
+InputNormalizer -> ConversationContextBuilder -> AgentRuntime -> ExtractionProvider
+  -> optional ToolGuard/ToolExecutor -> optional final model answer -> ResponseComposer
 ```
 
 当前 `InputNormalizer` 已作为后端内部 adapter 层接入会话消息发送流程：

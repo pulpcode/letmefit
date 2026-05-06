@@ -43,7 +43,7 @@ LetMeFit 是一个健康健身管理 Agent。V1 的核心闭环是：
 - 短信：阿里云号码认证服务 Dypnsapi
 - 部署：腾讯云 4 核 4G 云服务器；后端用 uv + systemd 运行，MySQL/Redis 用 Docker Compose；Nginx 可选
 - 媒体存储：本地开发/测试可用客户端本地或服务端本地存储，生产建议 S3 兼容对象存储
-- Agent 框架：V1 自研轻量编排，暂不引入 LangChain/LangGraph/Deep Agents
+- Agent 框架：V1 自研 bounded ReAct loop，暂不引入 LangChain/LangGraph/Deep Agents
 - API 文档：OpenAPI 自动文档 + `docs/backend-api-v1.md`
 
 如需替换技术栈，先更新 `docs/technical-architecture.md`，再改代码。
@@ -62,7 +62,7 @@ V1 不采用 Python + Java 双后端。除非有明确的高并发、强事务�
 - API 响应结构遵循 `docs/backend-api-v1.md`
 - 业务规则放在 `services/` 或 `rules/`，不要塞进路由函数
 - AI 外部接口按会话消息和待确认动作设计，不按 `meal-photo`、`meal-voice`、`scale-photo` 设计
-- 多模态输入统一经过 `InputNormalizer -> IntentRouter -> ExtractionService -> RuleEngine -> ResponseComposer`
+- 多模态输入统一经过 `InputNormalizer -> ConversationContextBuilder -> AgentRuntime -> ExtractionService -> 后端规则判定/响应合成`
 - V1 至少需要文本 LLM、语音转文字模型和图片理解模型；TTS 暂不需要
 - MiniMax 可作为文本对话候选，但不作为 V1 唯一模型供应商
 

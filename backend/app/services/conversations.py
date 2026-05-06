@@ -4,6 +4,7 @@ from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai.agent_runtime import AgentRuntime
 from app.ai.extraction_service import ExtractionService
 from app.ai.input_normalizer import InputNormalizer
 from app.ai.prompt_payload import build_extraction_user_prompt_payload
@@ -31,6 +32,7 @@ class ConversationService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.extraction_service = ExtractionService(db)
+        self.agent_runtime = AgentRuntime(db, extraction_service=self.extraction_service)
         self.context_builder = ConversationContextBuilder(db)
         self.summary_service = ConversationSummaryService(db)
         self.input_normalizer = InputNormalizer()
@@ -113,7 +115,7 @@ class ConversationService:
             content=normalized_input.content,
             context=context,
         )
-        extraction_result = self.extraction_service.process_message(
+        extraction_result = self.agent_runtime.run(
             user_id=user_id,
             conversation_id=conversation.id,
             message_id=user_message.id,
@@ -161,6 +163,8 @@ class ConversationService:
             "committed_records": extraction_result["committed_records"],
             "tool_results": extraction_result.get("tool_results", []),
         }
+        if payload.include_agent_trace:
+            response["agent_trace"] = extraction_result.get("agent_trace", [])
         if debug_context is not None:
             response["debug_context"] = debug_context
         return response

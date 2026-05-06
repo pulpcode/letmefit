@@ -56,14 +56,16 @@ Do not introduce a Java backend in V1.
 - Do not create narrow multimodal endpoints such as `meal-photo`, `meal-voice`, or `scale-photo`.
 - V1 Agent pipeline is lightweight and self-built:
   - `InputNormalizer`
-  - `IntentRouter`
+  - `ConversationContextBuilder`
+  - `AgentRuntime`
+  - `ExtractionProvider`
   - `ExtractionService`
-  - `RuleEngine`
-  - `ResponseComposer`
+  - backend commit rules / response composition
 - Do not introduce LangChain, LangGraph, or Deep Agents unless the architecture document is explicitly changed.
 - Model providers must be replaceable through adapters.
 - V1 text LLM provider is Alibaba Cloud Bailian / DashScope through the OpenAI-compatible API.
 - LLM structured output must follow `../docs/ai-extraction-schema-v1.md`.
+- When product, architecture, or agent flow design changes, re-review backend system prompts and update them if the model role, safety boundary, tool-call contract, or context authority rules have changed.
 - Keep `AI_PROVIDER=mock` as the default for tests and local development unless explicitly testing Bailian.
 - Build model context through `ConversationContextBuilder`; do not send full conversation history to the model.
 - Treat `conversation_summaries` as rolling context only, not as formal user facts.

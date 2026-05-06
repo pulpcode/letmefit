@@ -157,6 +157,8 @@ export type SendMessageResponse = {
   intent?: string;
   requires_review?: boolean;
   committed_records?: Array<Record<string, unknown>>;
+  tool_results?: Array<Record<string, unknown>>;
+  agent_trace?: Array<Record<string, unknown>>;
   pending_actions?: PendingAction[];
 };
 

@@ -22,6 +22,14 @@ class MockExtractionProvider(ExtractionProvider):
 
     def extract(self, payload: ExtractionInput) -> ExtractionProviderResult:
         text = self._joined_text(payload.content)
+        if payload.context.get("agent_loop", {}).get("tool_results"):
+            return ExtractionProviderResult(
+                assistant_text="我已根据工具结果完成处理。",
+                intent="answer_fitness_question",
+                requires_review=False,
+                confidence=Decimal("0.70"),
+                raw_output={"mock": True, "text": text, "agent_loop_final": True},
+            )
         if self._is_out_of_scope(text):
             return ExtractionProviderResult(
                 assistant_text=(

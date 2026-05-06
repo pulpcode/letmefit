@@ -27,11 +27,15 @@ class PendingActionGroundingOutput(BaseModel):
 
     source: GroundingSource
     evidence_text: str = Field(default="", max_length=4000)
+    source_id: str | None = Field(default=None, max_length=128)
+    confidence: Decimal | None = Field(default=None, ge=0, le=1)
 
     def to_grounding(self) -> ActionGrounding:
         return ActionGrounding(
             source=self.source,
             evidence_text=self.evidence_text,
+            source_id=self.source_id,
+            confidence=self.confidence,
         )
 
 

@@ -460,6 +460,10 @@
             <input id="includeDebugContext" type="checkbox" checked />
             显示 LLM 上下文
           </label>
+          <label class="checkbox">
+            <input id="includeAgentTrace" type="checkbox" checked />
+            显示 Agent Trace
+          </label>
           <div class="grid" style="margin-top: 12px">
             <label>
               Pending Action ID
@@ -562,6 +566,10 @@
           <span>LLM 请求 body</span>
           <pre id="llmRequestOutput"></pre>
         </div>
+        <div class="state">
+          <span>Agent Trace</span>
+          <pre id="agentTraceOutput"></pre>
+        </div>
       </section>
     </main>
 
@@ -628,6 +636,10 @@
 
       function includeDebugContext() {
         return $("includeDebugContext").checked;
+      }
+
+      function includeAgentTrace() {
+        return $("includeAgentTrace").checked;
       }
 
       function messagePartText(part) {
@@ -846,6 +858,7 @@
       function log(value) {
         $("responseOutput").textContent = JSON.stringify(withoutDebugContext(value), null, 2);
         $("llmRequestOutput").textContent = JSON.stringify(extractLlmRequestBody(value), null, 2);
+        $("agentTraceOutput").textContent = JSON.stringify(extractAgentTrace(value), null, 2);
       }
 
       function extractLlmRequestBody(value) {
@@ -876,6 +889,41 @@
         }
         for (const item of Object.values(value)) {
           const found = findLlmRequestBody(item);
+          if (found) {
+            return found;
+          }
+        }
+        return null;
+      }
+
+      function extractAgentTrace(value) {
+        const trace = findAgentTrace(value);
+        if (trace) {
+          return trace;
+        }
+        return {
+          note: "本次响应没有 agent_trace。发送消息并勾选“显示 Agent Trace”后会显示。",
+        };
+      }
+
+      function findAgentTrace(value) {
+        if (!value || typeof value !== "object") {
+          return null;
+        }
+        if (Array.isArray(value.agent_trace)) {
+          return value.agent_trace;
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const found = findAgentTrace(item);
+            if (found) {
+              return found;
+            }
+          }
+          return null;
+        }
+        for (const item of Object.values(value)) {
+          const found = findAgentTrace(item);
           if (found) {
             return found;
           }
@@ -1057,6 +1105,7 @@
             body: {
               content: [{ type: "text", text: userText }],
               include_debug_context: includeDebugContext(),
+              include_agent_trace: includeAgentTrace(),
             },
           });
           cacheDebugTurn(response, userText);
@@ -1100,6 +1149,7 @@
             method: "POST",
             body: {
               include_debug_context: includeDebugContext(),
+              include_agent_trace: includeAgentTrace(),
               content: [
                 { type: "text", text: audioPrompt() },
                 {
@@ -1145,6 +1195,7 @@
             method: "POST",
             body: {
               include_debug_context: includeDebugContext(),
+              include_agent_trace: includeAgentTrace(),
               content: [
                 { type: "text", text: audioPrompt() },
                 {

@@ -7,6 +7,7 @@
 - `backend/app/services/conversations.py`
 - `backend/app/services/conversation_context.py`
 - `backend/app/services/pending_actions.py`
+- `backend/app/ai/agent_runtime.py`
 - `backend/app/ai/prompt_payload.py`
 - `backend/app/ai/providers/bailian.py`
 
@@ -37,8 +38,9 @@ LetMeFit 的 Agent 对话同时承担三件事：
   -> 绑定 MessageAttachment
   -> InputNormalizer 处理语音/图片
   -> ConversationContextBuilder.build
-  -> ExtractionService.process_message
+  -> AgentRuntime.run
   -> BailianExtractionProvider.extract
+  -> 可选工具执行与 tool_results 回填
   -> 生成 assistant ConversationMessage
   -> 必要时生成 AgentPendingAction
   -> compact_if_needed 滚动压缩旧消息
@@ -209,7 +211,7 @@ image file_id
 }
 ```
 
-它只允许在用户下一条消息明确接受或继续该提议时使用；无论用户接茬、拒绝还是转移话题，本轮结束后旧 `active_offer` 都会失效。新 offer 由 LLM 输出 `dialogue_state_patch.new_active_offer`，后端只做结构校验和一回合生命周期管理。
+它只允许在用户下一条消息明确接受或继续该提议时使用；无论用户接茬、拒绝还是转移话题，本轮结束后旧 `active_offer` 都会失效。新 offer 由 LLM 输出 `dialogue_state_patch.new_active_offer`，后端只做结构校验和一回合生命周期管理。`active_offer` 不是正式事实来源，也不能替代 `profile`、`recent_records` 或 `active_pending_actions`。
 
 更长期的主题线索放在 `durable_context`，例如 `last_topic`。这类信息只能帮助理解上下文，不能自动消费用户的“好的/可以”。
 
@@ -481,7 +483,7 @@ body_metric_records
 
 因此，确认后的内容不是通过历史 assistant 回复变成事实，而是通过正式记录表进入下一次上下文。
 
-## 7. 当前暴露出的问题
+## 7. 已处理的问题与剩余风险
 
 从测试返回可以看到一个典型问题：
 
@@ -490,7 +492,7 @@ body_metric_records
 模型回复: 我无法判断您今天是否吃得太多...
 ```
 
-这说明模型被 `recent_messages` 中的历史问题“我今天吃的多吗”带偏了。
+这说明模型曾经会被 `recent_messages` 中的历史问题“我今天吃的多吗”带偏。
 
 根因不是单一字段错误，而是上下文契约不清楚：
 
@@ -500,17 +502,20 @@ body_metric_records
 4. `recent_records` 是正式事实，但当前 prompt 没有明确它比历史对话更权威。
 5. 历史消息重复出现相同问答，会放大模型的延续倾向。
 
-## 8. 建议的上下文权威级别
+这些问题已经通过 `context_contract` 明确权威顺序和历史线索边界来缓解。剩余风险主要是模型仍可能在复杂指代里过度承接历史，因此回归测试需要继续覆盖问候、新问题、拒绝、接受 offer 和询问正式记录等场景。
 
-后续应在 prompt payload 中明确加入 `context_contract`，固定权威顺序：
+## 8. 当前上下文权威级别
+
+`build_extraction_user_prompt_payload` 已在 prompt payload 中加入 `context_contract`，固定权威顺序：
 
 ```text
 1. 当前 message_content
 2. 正式数据：profile、recent_records
 3. 当前仍活跃的 active_pending_actions
-4. conversation_summary
-5. recent_messages
-6. input_normalization 作为当前媒体处理证据
+4. ephemeral_state.active_offer 作为一回合承接令牌
+5. input_normalization 作为当前媒体处理证据
+6. conversation_summary
+7. recent_messages
 ```
 
 解释：
@@ -518,10 +523,14 @@ body_metric_records
 - `message_content` 是本轮任务本身。
 - `profile` 与 `recent_records` 是后端正式数据，可信度最高。
 - `active_pending_actions` 表示当前仍需要用户处理的草稿。
+- `active_offer` 只能帮助判断用户是否承接上一轮提议，不是正式事实。
 - `conversation_summary` 和 `recent_messages` 只是帮助理解上下文，不能覆盖正式数据。
 - 旧 assistant 文案不能作为 pending action 是否存在的依据。
+- AgentRuntime 会把本次 loop 中的 `tool_results` 放入 `conversation_context.agent_loop`，仅用于本次请求内的后续模型决策。
+- `profile`、`recent_records`、`active_pending_actions` 已经默认进入上下文，不需要再设计成必调只读工具。
+- 记录写入使用分级 grounding：当前消息或可信媒体文本可进入自动保存判断；历史用户消息、活跃草稿、工具结果和助手方案最多创建确认卡；正式记录只用于回答和总结；模型推断不能写记录。
 
-建议写入 prompt 的契约：
+当前写入 prompt 的契约：
 
 ```json
 {
@@ -530,14 +539,15 @@ body_metric_records
     "official_facts": "profile and recent_records are confirmed backend facts.",
     "pending_actions": "Only active_pending_actions represents currently unresolved drafts.",
     "history_role": "recent_messages and conversation_summary are non-authoritative conversation history.",
-    "media_rule": "Only use media content when input_normalization status is transcribed or described."
+    "media_rule": "Only use media content when input_normalization status is transcribed or described.",
+    "offer_rule": "active_offer is a one-turn continuation token, not an official fact."
   }
 }
 ```
 
-## 9. 建议的上下文结构 v1.1
+## 9. 当前上下文结构
 
-建议下一步把 LLM user prompt 调整为：
+当前 LLM user prompt 的关键结构为：
 
 ```json
 {
@@ -548,6 +558,8 @@ body_metric_records
       "profile",
       "recent_records",
       "active_pending_actions",
+      "ephemeral_state.active_offer",
+      "input_normalization",
       "conversation_summary",
       "recent_messages"
     ],
@@ -555,6 +567,8 @@ body_metric_records
       "当前消息优先于历史消息。",
       "正式记录优先于历史对话文本。",
       "只有 active_pending_actions 表示当前仍待确认。",
+      "profile、recent_records、active_pending_actions 已在默认上下文中，不要为了读取它们重复调用工具。",
+      "需要查库时可调用只读工具，信息不足时 assistant_text 追问且 tool_calls=[]。",
       "如果当前消息是问候、无关输入或新问题，不要延续上一轮话题。",
       "不要从 unprocessed 媒体中猜测内容。"
     ]

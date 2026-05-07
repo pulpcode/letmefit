@@ -51,6 +51,19 @@ def decide_auto_commit(
     input_text: str,
     input_normalization: dict[str, Any] | None,
 ) -> CommitDecision:
+    return CommitDecision(False, "confirmation_required")
+
+
+def legacy_decide_auto_commit(
+    action_type: str,
+    draft_payload: dict[str, Any],
+    confidence: Decimal | None,
+    warnings: list[dict[str, Any]],
+    provider_warnings: list[dict[str, Any]],
+    input_types: list[str],
+    input_text: str,
+    input_normalization: dict[str, Any] | None,
+) -> CommitDecision:
     if warnings or provider_warnings:
         return CommitDecision(False, "has_warnings")
     if _has_unprocessed_media(input_normalization):

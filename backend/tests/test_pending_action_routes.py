@@ -1,8 +1,12 @@
+from datetime import timedelta
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
+from app.auth.security import utc_now
+from app.core.errors import AppError
 from app.main import create_app
 from app.models import User
 from app.schemas.pending_action import (
@@ -288,3 +292,122 @@ def test_committed_event_text_summarizes_meal_items() -> None:
     )
 
     assert text == "已保存到正式记录：早餐，鸡蛋（2个），约 156 千卡。"
+
+
+def test_update_action_status_is_decided_by_backend_rules() -> None:
+    action = SimpleNamespace(
+        id="pa_test",
+        user_id="user_test",
+        action_type="create_meal_record",
+        status="pending_confirmation",
+        draft_payload_json={
+            "recorded_at": "2026-05-01T12:30:00+08:00",
+            "source_type": "text",
+            "meal_type": "lunch",
+            "items": [{"name": "炒面", "portion_text": "300g"}],
+        },
+        warnings_json=[],
+        expires_at=None,
+        confidence=None,
+        created_at=None,
+        updated_at=None,
+    )
+
+    class FakeDb:
+        def scalar(self, query):
+            return action
+
+        def flush(self):
+            pass
+
+    service = PendingActionService(db=FakeDb())
+
+    fuzzy = service.update_action(
+        "user_test",
+        "pa_test",
+        PendingActionUpdateRequest(
+            draft_payload={"items": [{"name": "炒面", "portion_text": "比300g少一点"}]}
+        ),
+        commit=False,
+    )
+    precise = service.update_action(
+        "user_test",
+        "pa_test",
+        PendingActionUpdateRequest(
+            draft_payload={"items": [{"name": "炒面", "portion_text": "200g"}]}
+        ),
+        commit=False,
+    )
+
+    assert fuzzy["status"] == "needs_clarification"
+    assert fuzzy["warnings"][-1]["reason"] == "needs_clarification"
+    assert precise["status"] == "pending_confirmation"
+    assert precise["warnings"] == []
+
+
+def test_list_for_conversation_marks_expired_actions() -> None:
+    now = utc_now()
+    expired = SimpleNamespace(
+        id="pa_old",
+        user_id="user_test",
+        action_type="create_meal_record",
+        status="pending_confirmation",
+        draft_payload_json={"meal_type": "lunch", "items": [{"name": "炒面"}]},
+        warnings_json=[],
+        expires_at=now - timedelta(minutes=1),
+        confidence=None,
+        created_at=now - timedelta(days=1),
+        updated_at=now - timedelta(days=1),
+    )
+    fresh = SimpleNamespace(
+        id="pa_new",
+        user_id="user_test",
+        action_type="create_meal_record",
+        status="pending_confirmation",
+        draft_payload_json={"meal_type": "lunch", "items": [{"name": "炒面"}]},
+        warnings_json=[],
+        expires_at=now + timedelta(hours=1),
+        confidence=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.commit_count = 0
+
+        def scalar(self, query):
+            return SimpleNamespace(id="conv_test")
+
+        def scalars(self, query):
+            return [expired, fresh]
+
+        def commit(self):
+            self.commit_count += 1
+
+    db = FakeDb()
+    service = PendingActionService(db=db)
+
+    response = service.list_for_conversation("user_test", "conv_test")
+
+    assert expired.status == "expired"
+    assert fresh.status == "pending_confirmation"
+    assert db.commit_count == 1
+    assert [item["status"] for item in response["pending_actions"]] == [
+        "expired",
+        "pending_confirmation",
+    ]
+
+
+def test_needs_clarification_cannot_be_confirmed() -> None:
+    class FakeDb:
+        def flush(self):
+            pass
+
+    service = PendingActionService(db=FakeDb())
+    action = SimpleNamespace(status="needs_clarification", expires_at=None)
+
+    with pytest.raises(AppError) as exc:
+        service._ensure_confirmable(action)
+
+    assert exc.value.code == "PENDING_ACTION_NEEDS_CLARIFICATION"

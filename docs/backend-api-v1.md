@@ -572,7 +572,7 @@ V1 第一阶段使用本地规则生成总结，后续可替换为 LLM adapter�
 
 V1 的交互形式是通用 Agent 对话。用户可以发送文本、图片、拍照图片或语音，后端只在健身管理边界内处理能力。
 
-Agent 接口可以返回自然语言回复、自动写入的正式记录，也可以返回结构化待确认动作。低歧义、明确数值的身体指标和精确克重餐食可由后端规则自动写入；图片识别、模糊描述、低置信度或字段不完整的结果必须先生成 `pending_action`，由客户端展示确认卡片。用户确认或修改后，后端才写入正式记录。
+Agent 接口可以返回自然语言回复，也可以返回结构化待确认动作。AI 生成的餐食、身体指标和未来的锻炼记录默认先生成 `pending_action`，由客户端展示确认卡片；用户点击确认或通过自然语言明确确认后，后端才写入正式记录。
 
 模型调用前，后端会先用 `InputNormalizer` 处理图片和音频 part，再用 `ContextBuilder` 动态组装上下文。上下文包含多模态处理状态、滚动摘要、最近若干条会话消息、当前待确认动作、用户档案和最近正式记录；不会把全量历史消息直接发送给模型。较早消息会压缩进 `conversation_summaries`，该摘要只用于后续模型上下文，不作为正式事实来源。
 
@@ -739,42 +739,40 @@ Agent 接口可以返回自然语言回复、自动写入的正式记录，也�
 
 未请求 `include_agent_trace` 时，响应不会包含 `agent_trace` 字段，以保持旧客户端兼容。
 
-明确输入可能被自动保存，此时 `requires_review=false`、`pending_actions=[]`，并返回 `committed_records`：
+明确输入也会先生成确认卡，此时 `requires_review=true`，并返回 `pending_actions`：
 
 ```json
 {
   "data": {
     "message_id": "msg_...",
     "assistant_message_id": "msg_...",
-    "assistant_text": "已自动保存：体重 72.4kg。可在记录页修改或删除。",
+    "assistant_text": "我整理出一条身体指标草稿，尚未保存为正式记录，请确认或修改后再保存。",
     "intent": "fitness_record",
-    "requires_review": false,
-    "pending_actions": [],
+    "requires_review": true,
+    "pending_actions": [
+      {
+        "pending_action_id": "pa_...",
+        "type": "create_body_metric_record",
+        "status": "pending_confirmation",
+        "confidence": 0.9,
+        "draft_payload": {
+          "recorded_at": "2026-05-06T08:00:00+08:00",
+          "source_type": "text",
+          "weight_kg": 72.4
+        },
+        "warnings": [],
+        "expires_at": "2026-05-07T08:00:00"
+      }
+    ],
     "tool_results": [
       {
         "tool_name": "propose_body_metric_record",
         "action_type": "create_body_metric_record",
-        "status": "committed",
-        "record_type": "body_metric",
-        "record_id": "bm_..."
+        "status": "pending_confirmation",
+        "pending_action_id": "pa_..."
       }
     ],
-    "committed_records": [
-      {
-        "type": "body_metric",
-        "record_id": "bm_...",
-        "source": "auto_commit",
-        "source_message_id": "msg_...",
-        "confidence": 0.9,
-        "decision_reason": "clear_body_metric",
-        "message": "已自动保存：体重 72.4kg。可在记录页修改或删除。",
-        "record": {
-          "id": "bm_...",
-          "source_type": "text",
-          "weight_kg": 72.4
-        }
-      }
-    ]
+    "committed_records": []
   },
   "request_id": "req_..."
 }
@@ -908,9 +906,9 @@ out_of_scope
 
 ### PATCH /agent/pending-actions/{pending_action_id}
 
-修改待确认动作的草稿字段。结构化编辑可以直接 PATCH `draft_payload`；普通聊天中的自然语言修改不由后端关键词解析，而是由 LLM 基于 `active_pending_actions` 判断，并在需要时调用 `update_pending_action` 工具更新原草稿。修改只更新草稿，不写入正式记录；用户仍需再次确认保存。
+修改待确认动作的草稿字段。结构化编辑可以直接 PATCH `draft_payload`；普通聊天中的自然语言修改不由后端关键词解析，而是由 LLM 基于 `active_pending_actions` 判断，并在需要时调用 `update_pending_action` 工具更新原草稿。修改只更新草稿，不写入正式记录；后端会根据字段完整性自动决定状态是 `pending_confirmation` 还是 `needs_clarification`。
 
-如果用户在普通对话中明确表达保存/确认某个待确认草稿，LLM 应调用 `commit_pending_action` 工具。后端只校验该 pending action 是否仍然活跃、是否属于当前用户，以及工具调用是否引用了当前用户消息，不用关键词判断用户意图。
+如果用户在普通对话中明确表达保存/确认某个待确认草稿，LLM 应调用 `commit_pending_action` 工具；批量确认或放弃时调用 `commit_pending_actions` / `discard_pending_actions`。后端只校验该 pending action 是否仍然活跃、未过期、属于当前用户，以及工具调用是否引用了当前用户消息，不用关键词判断用户意图。
 
 请求：
 
@@ -948,7 +946,7 @@ out_of_scope
 
 确认成功后，`agent_pending_actions.status` 更新为 `committed`，并写入 `committed_record_type` 和 `committed_record_id`。正式记录会写入 `source_pending_action_id`，用于从记录反查来源确认动作。
 
-请求体可省略。正式客户端在用户确认后应传 `continue_agent=true`，让模型继续处理当前对话中被确认卡暂停的剩余问题：
+请求体可省略。正式客户端默认可不传 `continue_agent`；只有需要继续总结、回答剩余问题或调试 trace 时才传：
 
 ```json
 {

@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.auth.security import new_id, utc_now
@@ -18,15 +18,19 @@ from app.models import (
     UserProfile,
 )
 from app.services.dialogue_state import dialogue_state_context
+from app.services.pending_action_lifecycle import (
+    ACTIVE_PENDING_ACTION_STATUSES,
+    CONTEXT_PENDING_ACTION_LIMIT,
+    EXPIRED,
+    pending_action_context_summary,
+)
 
-ACTIVE_PENDING_ACTION_STATUSES = {"needs_clarification", "pending_confirmation"}
 ACTIVE_SUMMARY_JOB_STATUSES = {"pending", "running"}
 PENDING_SUMMARY_JOB_STATUS = "pending"
 RUNNING_SUMMARY_JOB_STATUS = "running"
 SUCCEEDED_SUMMARY_STATUS = "succeeded"
 FAILED_SUMMARY_STATUS = "failed"
 CONTEXT_RECORD_LIMIT = 5
-CONTEXT_PENDING_ACTION_LIMIT = 10
 LOCAL_SUMMARY_MODEL_NAME = "local_compose_summary_v1"
 
 
@@ -81,7 +85,7 @@ class ConversationContextBuilder:
             "short_term_messages": [
                 self._full_message_context(message) for message in short_term_messages
             ],
-            "active_pending_actions": self._pending_action_context(user_id, conversation_id),
+            **self._pending_action_context(user_id, conversation_id),
             "recent_records": self._recent_records_context(user_id),
         }
 
@@ -221,29 +225,67 @@ class ConversationContextBuilder:
             "created_at": _iso_or_none(message.created_at),
         }
 
-    def _pending_action_context(self, user_id: str, conversation_id: str) -> list[dict[str, Any]]:
-        actions = list(
+    def _pending_action_context(self, user_id: str, conversation_id: str) -> dict[str, Any]:
+        now = utc_now()
+        expired_actions = list(
             self.db.scalars(
                 select(AgentPendingAction)
                 .where(
                     AgentPendingAction.user_id == user_id,
                     AgentPendingAction.conversation_id == conversation_id,
                     AgentPendingAction.status.in_(ACTIVE_PENDING_ACTION_STATUSES),
+                    AgentPendingAction.expires_at.is_not(None),
+                    AgentPendingAction.expires_at <= now,
                 )
-                .order_by(AgentPendingAction.created_at.asc())
-                .limit(CONTEXT_PENDING_ACTION_LIMIT)
+                .limit(100)
             )
         )
-        return [
-            {
-                "pending_action_id": action.id,
-                "type": action.action_type,
-                "status": action.status,
-                "draft_payload": action.draft_payload_json,
-                "warnings": action.warnings_json or [],
-            }
-            for action in actions
-        ]
+        for action in expired_actions:
+            action.status = EXPIRED
+
+        active_query = (
+            select(AgentPendingAction)
+            .where(
+                AgentPendingAction.user_id == user_id,
+                AgentPendingAction.conversation_id == conversation_id,
+                AgentPendingAction.status.in_(ACTIVE_PENDING_ACTION_STATUSES),
+                (
+                    AgentPendingAction.expires_at.is_(None)
+                    | (AgentPendingAction.expires_at > now)
+                ),
+            )
+            .order_by(AgentPendingAction.created_at.desc())
+        )
+        active_count = self.db.scalar(
+            select(func.count())
+            .select_from(AgentPendingAction)
+            .where(
+                AgentPendingAction.user_id == user_id,
+                AgentPendingAction.conversation_id == conversation_id,
+                AgentPendingAction.status.in_(ACTIVE_PENDING_ACTION_STATUSES),
+                (
+                    AgentPendingAction.expires_at.is_(None)
+                    | (AgentPendingAction.expires_at > now)
+                ),
+            )
+        ) or 0
+        actions = list(self.db.scalars(active_query.limit(CONTEXT_PENDING_ACTION_LIMIT)))
+        overflow_count = max(0, active_count - CONTEXT_PENDING_ACTION_LIMIT)
+        if expired_actions:
+            self.db.flush()
+        return {
+            "active_pending_actions": [
+                pending_action_context_summary(action, display_index=index)
+                for index, action in enumerate(actions, start=1)
+            ],
+            "active_pending_actions_overflow_count": overflow_count,
+            "active_pending_actions_overflow_hint": (
+                f"还有 {overflow_count} 条待确认记录未注入上下文；"
+                "如需处理，请让用户查看更多待确认记录。"
+                if overflow_count
+                else None
+            ),
+        }
 
     def _recent_records_context(self, user_id: str) -> dict[str, list[dict[str, Any]]]:
         meals = list(

@@ -32,7 +32,10 @@ Component({
       const payload = action.draft_payload || {};
       const warnings = action.warnings || [];
       const warningFields = warnings.map((item: any) => item.field).filter(Boolean);
-      const warningText = "部分字段为估算值，确认前可修改";
+      const needsClarification = action.status === "needs_clarification";
+      const warningText = needsClarification
+        ? "这条草稿还缺少关键信息，请补充后再保存"
+        : "部分字段为估算值，确认前可修改";
 
       if (action.type === "create_meal_record") {
         const items = (payload.items || []).map((item: any) => ({
@@ -60,7 +63,8 @@ Component({
               { label: "脂肪", value: numberText(Number(totalFat.toFixed ? totalFat.toFixed(1) : totalFat), "g") }
             ],
             hasWarnings: warningFields.length > 0 || (action.confidence || 1) < 0.8,
-            warningText
+            warningText,
+            needsClarification
           }
         });
         return;
@@ -78,7 +82,27 @@ Component({
               { label: "记录时间", value: payload.recorded_at ? "刚刚" : "待确认" }
             ],
             hasWarnings: warningFields.length > 0 || (action.confidence || 1) < 0.8,
-            warningText
+            warningText,
+            needsClarification
+          }
+        });
+        return;
+      }
+
+      if (action.type === "create_workout_record") {
+        this.setData({
+          card: {
+            kind: "workout",
+            title: "锻炼记录",
+            fields: [
+              { label: "运动", value: payload.workout_type || payload.exercise_type || payload.name || "待确认" },
+              { label: "时长", value: payload.duration_minutes ? `${payload.duration_minutes} 分钟` : (payload.duration_text || "待确认") },
+              { label: "强度", value: payload.intensity || "待确认" },
+              { label: "消耗", value: numberText(payload.calories_burned, " kcal") }
+            ],
+            hasWarnings: true,
+            warningText: needsClarification ? warningText : "锻炼记录功能正在完善，确认前请检查字段",
+            needsClarification
           }
         });
         return;
@@ -89,7 +113,8 @@ Component({
           kind: "unknown",
           title: "待确认动作",
           hasWarnings: warningFields.length > 0,
-          warningText
+          warningText,
+          needsClarification
         }
       });
     },

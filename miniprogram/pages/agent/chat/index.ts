@@ -165,8 +165,8 @@ Page({
         .filter((msg) => msg.text);
       this.setData({
         messages,
-        pendingActions: (pendingData.pending_actions || []).filter(
-          (item) => item.status === "pending_confirmation"
+        pendingActions: (pendingData.pending_actions || []).filter((item) =>
+          item.status === "pending_confirmation" || item.status === "needs_clarification"
         )
       });
       this.scrollToBottom();
@@ -216,7 +216,7 @@ Page({
         pendingActions: data.pending_actions || this.data.pendingActions
       });
       if (data.committed_records?.length) {
-        wx.showToast({ title: "已自动保存", icon: "success" });
+        wx.showToast({ title: "已保存", icon: "success" });
       }
       this.scrollToBottom();
     } catch (error) {
@@ -407,7 +407,7 @@ Page({
         pendingActions: data.pending_actions || this.data.pendingActions
       });
       if (data.committed_records?.length) {
-        wx.showToast({ title: "已自动保存", icon: "success" });
+        wx.showToast({ title: "已保存", icon: "success" });
       }
       this.scrollToBottom();
     } catch (error) {

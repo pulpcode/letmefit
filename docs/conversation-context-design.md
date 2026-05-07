@@ -16,8 +16,8 @@
 LetMeFit 的 Agent 对话同时承担三件事：
 
 1. 接收用户输入，包括文本、语音、图片。
-2. 通过 LLM 提取结构化候选动作，由后端规则决定自动保存或进入待确认。
-3. 自动保存或用户确认后，把记录写入正式记录，并在后续对话中作为可信事实使用。
+2. 通过 LLM 提取结构化候选动作，由后端规则决定是否生成待确认动作。
+3. 用户确认后，把记录写入正式记录，并在后续对话中作为可信事实使用。
 
 因此上下文不能只是“最近聊天记录”。它必须区分：
 
@@ -197,7 +197,7 @@ image file_id
 
 ### 4.2 ephemeral_state / durable_context
 
-`ephemeral_state.active_offer` 是上一轮助手提出的通用一次性承接令牌，例如“需要我帮你规划晚餐吗？”。它不使用固定业务枚举，而是保存助手原话和通用 referent：
+`ephemeral_state.active_offer` 是上一轮助手提出的通用一次性承接令牌，例如“需要我帮你规划晚餐吗？”。它不使用固定业务枚举，而是保存一段 debug 描述和通用 referent：
 
 ```json
 {
@@ -211,7 +211,9 @@ image file_id
 }
 ```
 
-它只允许在用户下一条消息明确接受或继续该提议时使用；无论用户接茬、拒绝还是转移话题，本轮结束后旧 `active_offer` 都会失效。新 offer 由 LLM 输出 `dialogue_state_patch.new_active_offer`，后端只做结构校验和一回合生命周期管理。`active_offer` 不是正式事实来源，也不能替代 `profile`、`recent_records` 或 `active_pending_actions`。
+`surface_text` 只作为后端 debug/审计描述，要求非空并限长，不要求和 `assistant_text` 逐字匹配。`referent.expected_followup` 的主要读者是下一轮模型，用于提示“如果用户接受，应如何续聊”；后端只做结构校验和存储，不把它当业务规则执行。
+
+它只允许在用户下一条消息明确接受或继续该提议时使用。处理顺序是：构建本轮 context 时注入上一轮 `active_offer`；模型可以在本轮承接它；本轮 assistant 响应生成并存储时，后端清除旧 offer；如果本轮响应包含新的 `dialogue_state_patch.new_active_offer`，则替换成新的下一回合 token。`active_offer` 不是正式事实来源，也不能替代 `profile`、`recent_records` 或 `active_pending_actions`。
 
 更长期的主题线索放在 `durable_context`，例如 `last_topic`。这类信息只能帮助理解上下文，不能自动消费用户的“好的/可以”。
 
@@ -531,7 +533,7 @@ body_metric_records
 - AgentRuntime 会把本次 loop 中的 `tool_results` 放入 `conversation_context.agent_loop`，仅用于本次请求内的后续模型决策。
 - `input_origin=pending_action_observation` 时，模型只能基于 observation 回答、规划或调用只读查询工具，不能创建新的记录写入工具。
 - `profile`、`recent_records`、`active_pending_actions` 已经默认进入上下文，不需要再设计成必调只读工具。
-- 记录写入使用分级 grounding：当前消息或可信媒体文本可进入自动保存判断；历史用户消息、活跃草稿、工具结果和助手方案最多创建确认卡；正式记录只用于回答和总结；模型推断不能写记录。
+- 记录写入使用分级 grounding：当前消息或可信媒体文本可创建确认卡；历史用户消息、活跃草稿、工具结果和助手方案最多创建确认卡；正式记录只用于回答和总结；模型推断不能写记录。
 
 当前写入 prompt 的契约：
 
@@ -627,7 +629,7 @@ body_metric_records
 当前机制已经具备 V1 所需的基本闭环：
 
 ```text
-消息 -> 多模态归一化 -> 上下文构造 -> LLM 提取 -> 后端规则判定 -> 自动保存/用户确认 -> 正式记录 -> 下一次上下文
+消息 -> 多模态归一化 -> 上下文构造 -> LLM 提取 -> 后端规则判定 -> 用户确认 -> 正式记录 -> 下一次上下文
 ```
 
 但上下文语义需要补强。最关键的修正不是增加更多历史，而是让模型明确知道每类上下文的权威级别：

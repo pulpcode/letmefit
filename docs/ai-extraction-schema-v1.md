@@ -4,7 +4,7 @@
 
 LLM output is used by the backend AgentRuntime to answer fitness-management questions, ask clarifying questions, and request backend tools. It must not write formal records directly.
 
-The backend stores LLM output in `agent_extractions`, then applies backend commit rules. Clear low-risk actions may be committed automatically; ambiguous or low-confidence actions become `agent_pending_actions` and require user confirmation.
+The backend stores LLM output in `agent_extractions`, then applies backend rules. Record-creating actions become `agent_pending_actions` by default and require user confirmation before formal records are written.
 
 ## Provider
 
@@ -65,7 +65,7 @@ Fields:
 - `confidence`: 0-1 model confidence
 - `warnings`: low-confidence or missing-field warnings
 - `dialogue_state_patch`: optional one-turn dialogue-state hint; does not write formal facts
-- `tool_calls`: requested backend tools; backend may query read-only records, auto-commit clear record tools, or create pending actions
+- `tool_calls`: requested backend tools; backend may query read-only records or create pending actions; record-writing tools never write formal records directly
 - `tool_calls[].grounding`: required evidence metadata for every record tool call; read-only query tools do not need grounding
 
 ## Dialogue State Patch
@@ -91,10 +91,10 @@ When the assistant response creates a proposal that the next user turn may accep
 Rules:
 
 - `new_active_offer.kind` must be `assistant_offer`.
-- `surface_text` must come from the current `assistant_text`.
-- `referent` may only describe `topic`, `user_goal`, and `expected_followup`.
+- `surface_text` is a non-empty debug/audit description; it does not need to exactly match `assistant_text`.
+- `referent` may only describe `topic`, `user_goal`, and `expected_followup`; `expected_followup` is a continuation hint for the next model turn, not a backend business rule.
 - It must not contain profile, records, pending actions, draft payloads, or formal facts.
-- The backend treats it as a one-user-turn token and clears it after the next user message.
+- The backend injects the previous offer while processing the next user message, then clears the old offer when storing the new assistant response. If the response contains a new offer, it replaces the old one.
 
 ## Tool Calls
 
@@ -103,6 +103,7 @@ Supported V1 record tools:
 ```text
 propose_meal_record
 propose_body_metric_record
+propose_workout_record
 ```
 
 Supported V1 read-only query tools:
@@ -143,8 +144,8 @@ Allowed values:
 Rules:
 
 - `evidence_text` must be a verifiable snippet from the declared source.
-- `current_user_message` and `normalized_media_text` are the only sources that may enter auto-commit rules.
-- `recent_user_message`, `active_pending_action`, `tool_result`, and `assistant_plan` may create confirmation cards, but must not auto-save.
+- `current_user_message` and `normalized_media_text` may create confirmation cards.
+- `recent_user_message`, `active_pending_action`, `tool_result`, and `assistant_plan` may create confirmation cards, but must not directly save formal records.
 - `confirmed_record` and `model_inference` must not create new records.
 - Planning, recommendation, and advice responses must use `tool_calls=[]`.
 - Legacy `user_current_turn` is accepted as `current_user_message`; legacy `assistant_generated` is accepted as `assistant_plan`.
@@ -247,6 +248,38 @@ Rules:
 - Convert Chinese jin to kg when explicit, e.g. `144斤` -> `72kg`.
 - Do not infer missing body fat, BMI, muscle mass, or water percentage.
 - Missing optional fields should be omitted, not set to fake values.
+
+## Workout Draft
+
+Workout recording uses the same pending-action contract in V1, but formal workout database
+write support may land in a later implementation phase.
+
+```json
+{
+  "name": "propose_workout_record",
+  "confidence": 0.82,
+  "arguments": {
+    "recorded_at": "2026-05-01T19:30:00+08:00",
+    "source_type": "text",
+    "workout_type": "跑步",
+    "duration_minutes": 30,
+    "intensity": "moderate",
+    "calories_burned": 260,
+    "confidence": 0.82
+  },
+  "grounding": {
+    "source": "current_user_message",
+    "evidence_text": "晚上跑步30分钟"
+  },
+  "warnings": []
+}
+```
+
+Rules:
+
+- Include `workout_type`, `exercise_type`, or `name` when the user mentions the exercise.
+- Include `duration_minutes` when the duration is explicit; otherwise use `duration_text` and add a warning if it is vague.
+- Do not invent calories burned unless this is clearly marked as an estimate in `warnings`.
 
 ## Safety
 

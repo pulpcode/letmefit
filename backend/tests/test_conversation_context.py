@@ -1,6 +1,8 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
+from app.auth.security import utc_now
 from app.core.config import Settings
 from app.models import BodyMetricRecord, ConversationMessage, MealItem, MealRecord
 from app.services.conversation_context import (
@@ -180,6 +182,129 @@ def test_full_message_context_keeps_original_content() -> None:
 
     assert context["content"] == [{"type": "text", "text": "需要我帮你规划晚餐吗？"}]
     assert context["content_preview"] == "需要我帮你规划晚餐吗？"
+
+
+def test_pending_action_context_limits_recent_active_actions() -> None:
+    now = utc_now()
+
+    class FakeDb:
+        def scalar(self, query):
+            return 4
+
+        def scalars(self, query):
+            if not hasattr(self, "calls"):
+                self.calls = 0
+            self.calls += 1
+            if self.calls == 1:
+                return []
+            return [
+                SimpleNamespace(
+                    id=f"pa_{index}",
+                    action_type="create_meal_record",
+                    status="pending_confirmation",
+                    draft_payload_json={
+                        "meal_type": "lunch",
+                        "items": [{"name": f"食物{index}", "portion_text": "100g"}],
+                    },
+                    warnings_json=[],
+                    expires_at=now + timedelta(hours=1),
+                )
+                for index in range(3)
+            ]
+
+    builder = ConversationContextBuilder(
+        db=FakeDb(),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+
+    context = builder._pending_action_context("user_test", "conv_test")
+
+    assert len(context["active_pending_actions"]) == 3
+    assert context["active_pending_actions"][0]["display_index"] == 1
+    assert "draft_payload" not in context["active_pending_actions"][0]
+    assert context["active_pending_actions_overflow_count"] == 1
+    assert "还有 1 条" in context["active_pending_actions_overflow_hint"]
+
+
+def test_pending_action_context_includes_workout_summary() -> None:
+    now = utc_now()
+
+    class FakeDb:
+        def scalar(self, query):
+            return 1
+
+        def scalars(self, query):
+            if not hasattr(self, "calls"):
+                self.calls = 0
+            self.calls += 1
+            if self.calls == 1:
+                return []
+            return [
+                SimpleNamespace(
+                    id="pa_workout",
+                    action_type="create_workout_record",
+                    status="pending_confirmation",
+                    draft_payload_json={
+                        "recorded_at": "2026-05-01T19:30:00+08:00",
+                        "source_type": "text",
+                        "workout_type": "跑步",
+                        "duration_minutes": 30,
+                        "intensity": "moderate",
+                    },
+                    warnings_json=[],
+                    expires_at=now + timedelta(hours=1),
+                )
+            ]
+
+    builder = ConversationContextBuilder(
+        db=FakeDb(),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+
+    context = builder._pending_action_context("user_test", "conv_test")
+    action = context["active_pending_actions"][0]
+
+    assert action["type"] == "create_workout_record"
+    assert action["title"] == "跑步"
+    assert action["editable_fields"]["duration_minutes"] == 30
+
+
+def test_pending_action_context_expires_stale_actions() -> None:
+    expired = SimpleNamespace(
+        id="pa_old",
+        action_type="create_meal_record",
+        status="pending_confirmation",
+        draft_payload_json={},
+        warnings_json=[],
+        expires_at=utc_now() - timedelta(minutes=1),
+    )
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.flush_count = 0
+            self.scalars_count = 0
+
+        def scalar(self, query):
+            return 0
+
+        def scalars(self, query):
+            self.scalars_count += 1
+            return [expired] if self.scalars_count == 1 else []
+
+        def flush(self):
+            self.flush_count += 1
+
+    db = FakeDb()
+    builder = ConversationContextBuilder(
+        db=db,
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+
+    context = builder._pending_action_context("user_test", "conv_test")
+
+    assert expired.status == "expired"
+    assert db.flush_count == 1
+    assert context["active_pending_actions"] == []
 
 
 def test_estimate_tokens_returns_small_positive_number() -> None:

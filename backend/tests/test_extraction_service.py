@@ -80,8 +80,7 @@ def _settings() -> Settings:
     return Settings(jwt_secret_key="test-secret-key-with-enough-length")
 
 
-def test_extraction_service_auto_commits_clear_body_metric(monkeypatch) -> None:
-    monkeypatch.setattr("app.ai.extraction_service.BodyMetricService", FakeBodyMetricService)
+def test_extraction_service_creates_pending_action_for_clear_body_metric() -> None:
     provider = FakeProvider(
         ExtractionProviderResult(
             assistant_text="我识别到体重记录。",
@@ -116,12 +115,56 @@ def test_extraction_service_auto_commits_clear_body_metric(monkeypatch) -> None:
         context={},
     )
 
-    assert result["requires_review"] is False
-    assert result["pending_actions"] == []
-    assert result["committed_records"][0]["type"] == "body_metric"
-    assert result["committed_records"][0]["record_id"] == "bm_auto"
-    assert result["assistant_content"][0]["event_type"] == "record_auto_committed"
-    assert "已自动保存" in result["assistant_text"]
+    assert result["requires_review"] is True
+    assert result["committed_records"] == []
+    assert result["pending_actions"][0]["type"] == "create_body_metric_record"
+    assert result["pending_actions"][0]["status"] == "pending_confirmation"
+    assert result["pending_actions"][0]["expires_at"] is not None
+    assert "尚未保存为正式记录" in result["assistant_text"]
+
+
+def test_extraction_service_creates_pending_action_for_workout_contract() -> None:
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我识别到锻炼记录。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.86"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="propose_workout_record",
+                    confidence=Decimal("0.86"),
+                    arguments={
+                        "recorded_at": "2026-05-01T19:30:00+08:00",
+                        "source_type": "text",
+                        "workout_type": "跑步",
+                        "duration_minutes": 30,
+                        "intensity": "moderate",
+                    },
+                    grounding=ActionGrounding(
+                        source="current_user_message",
+                        evidence_text="晚上跑步30分钟",
+                    ),
+                    warnings=[],
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="晚上跑步30分钟")],
+        context={},
+    )
+
+    assert result["requires_review"] is True
+    assert result["committed_records"] == []
+    assert result["pending_actions"][0]["type"] == "create_workout_record"
+    assert result["pending_actions"][0]["status"] == "pending_confirmation"
+    assert result["pending_actions"][0]["draft_payload"]["workout_type"] == "跑步"
 
 
 def test_extraction_service_keeps_fuzzy_meal_as_pending() -> None:
@@ -813,9 +856,10 @@ def test_extraction_service_commits_active_pending_action_via_model_tool(monkeyp
         def __init__(self, db) -> None:
             self.db = db
 
-        def commit_action_for_agent(self, user_id, pending_action_id):
+        def commit_action_for_agent(self, user_id, pending_action_id, draft_payload_patch=None):
             assert user_id == "user_test"
             assert pending_action_id == "pa_test"
+            assert draft_payload_patch is None
             return {
                 "pending_action_id": pending_action_id,
                 "record_type": "meal",
@@ -870,6 +914,144 @@ def test_extraction_service_commits_active_pending_action_via_model_tool(monkeyp
     assert result["tool_results"][0]["tool_name"] == "commit_pending_action"
     assert result["tool_results"][0]["status"] == "committed"
     assert result["assistant_text"] == "已保存到正式记录：早餐。"
+
+
+def test_commit_pending_action_can_apply_precise_patch(monkeypatch) -> None:
+    class FakePendingActionService:
+        def __init__(self, db) -> None:
+            self.db = db
+
+        def commit_action_for_agent(self, user_id, pending_action_id, draft_payload_patch=None):
+            assert user_id == "user_test"
+            assert pending_action_id == "pa_test"
+            assert draft_payload_patch == {"items": [{"name": "炒面", "portion_text": "200g"}]}
+            return {
+                "pending_action_id": pending_action_id,
+                "record_type": "meal",
+                "record_id": "meal_test",
+                "record": {"id": "meal_test", "meal_type": "lunch", "items": []},
+                "message": "已保存到正式记录：午餐。",
+                "source_message_id": "msg_source",
+                "confidence": 0.85,
+            }
+
+    monkeypatch.setattr(
+        "app.services.pending_actions.PendingActionService",
+        FakePendingActionService,
+    )
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="好的，按200g保存。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.90"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="commit_pending_action",
+                    arguments={
+                        "pending_action_id": "pa_test",
+                        "draft_payload_patch": {
+                            "items": [{"name": "炒面", "portion_text": "200g"}]
+                        },
+                    },
+                    confidence=Decimal("0.90"),
+                    grounding=ActionGrounding(
+                        source="current_user_message",
+                        source_id="pa_test",
+                        evidence_text="改成200g，就这么记",
+                    ),
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="改成200g，就这么记")],
+        context={
+            "active_pending_actions": [
+                {"pending_action_id": "pa_test", "type": "create_meal_record"}
+            ]
+        },
+    )
+
+    assert result["committed_records"][0]["record_id"] == "meal_test"
+    assert result["tool_results"][0]["status"] == "committed"
+
+
+def test_batch_commit_pending_actions_tool_allows_partial_success(monkeypatch) -> None:
+    class FakePendingActionService:
+        def __init__(self, db) -> None:
+            self.db = db
+
+        def commit_actions_for_agent(self, user_id, pending_action_ids):
+            assert user_id == "user_test"
+            assert pending_action_ids == ["pa_ok", "pa_bad"]
+            return {
+                "committed": [
+                    {
+                        "pending_action_id": "pa_ok",
+                        "record_type": "meal",
+                        "record_id": "meal_ok",
+                        "record": {"id": "meal_ok"},
+                        "message": "已保存到正式记录：午餐。",
+                        "source_message_id": "msg_source",
+                        "confidence": 0.85,
+                    }
+                ],
+                "failed": [
+                    {
+                        "pending_action_id": "pa_bad",
+                        "code": "PENDING_ACTION_NEEDS_CLARIFICATION",
+                        "message": "这条候选记录仍需补充信息，暂不能保存",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(
+        "app.services.pending_actions.PendingActionService",
+        FakePendingActionService,
+    )
+    provider = FakeProvider(
+        ExtractionProviderResult(
+            assistant_text="我会保存可提交的记录。",
+            intent="fitness_record",
+            requires_review=True,
+            confidence=Decimal("0.90"),
+            tool_calls=[
+                ExtractionToolCall(
+                    name="commit_pending_actions",
+                    arguments={"pending_action_ids": ["pa_ok", "pa_bad"]},
+                    confidence=Decimal("0.90"),
+                    grounding=ActionGrounding(
+                        source="current_user_message",
+                        evidence_text="都记了吧",
+                    ),
+                )
+            ],
+        )
+    )
+    service = ExtractionService(FakeDb(), settings=_settings(), provider=provider)
+
+    result = service.process_message(
+        user_id="user_test",
+        conversation_id="conv_test",
+        message_id="msg_test",
+        content=[MessageContentItem(type="text", text="都记了吧")],
+        context={
+            "active_pending_actions": [
+                {"pending_action_id": "pa_ok", "type": "create_meal_record"},
+                {"pending_action_id": "pa_bad", "type": "create_body_metric_record"},
+            ]
+        },
+    )
+
+    assert result["committed_records"][0]["record_id"] == "meal_ok"
+    assert result["tool_results"][0]["status"] == "partial_committed"
+    assert result["tool_results"][0]["failed"][0]["pending_action_id"] == "pa_bad"
 
 
 def test_pending_action_tool_requires_current_message_grounding() -> None:

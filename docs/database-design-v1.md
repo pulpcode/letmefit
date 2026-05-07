@@ -24,7 +24,7 @@ V1 数据库支撑以下闭环：
 - 用户私有表必须包含 `user_id`
 - refresh token、手机号审计日志 IP 等敏感值只保存 hash 或脱敏值
 - 餐食、身体指标、文件默认软删除，使用 `deleted_at`
-- AI 提取结果不能由模型直接写入正式记录。模型输出先进入 `agent_extractions` 作为候选动作；明确、低歧义且通过后端规则校验的动作可自动写入正式记录，其余动作必须进入 `agent_pending_actions`
+- AI 提取结果不能由模型直接写入正式记录。模型输出先进入 `agent_extractions` 作为候选动作，并默认进入 `agent_pending_actions`；用户确认后才写入正式记录
 
 ## 2. 认证与用户
 
@@ -232,7 +232,7 @@ Agent 会话。
 
 ### 4.1 `agent_extractions`
 
-AI 原始提取结果。用于审计、调试和生成候选动作，不直接等同于正式记录。后端规则会决定候选动作是自动写入正式记录，还是进入待确认动作。
+AI 原始提取结果。用于审计、调试和生成候选动作，不直接等同于正式记录。后端规则会决定候选动作是否能生成待确认动作，以及待确认动作是否可被用户确认写入。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -256,7 +256,7 @@ AI 原始提取结果。用于审计、调试和生成候选动作，不直接�
 
 ### 4.2 `agent_pending_actions`
 
-对话中的待确认动作。它是 Review/Edit 确认卡片的数据来源。只有需要用户确认、修改或补充的信息才会进入此表；已被后端规则自动保存的明确记录不会产生 pending action。
+对话中的待确认动作。它是 Review/Edit 确认卡片的数据来源。AI 生成的餐食、身体指标和未来锻炼记录默认进入此表，用户确认后才写入正式记录。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -265,13 +265,13 @@ AI 原始提取结果。用于审计、调试和生成候选动作，不直接�
 | `conversation_id` | `VARCHAR(40)` FK | 会话 |
 | `source_message_id` | `VARCHAR(40)` FK | 触发动作的消息 |
 | `extraction_id` | `VARCHAR(40)` NULL FK | 来源 AI 提取 |
-| `action_type` | `VARCHAR(64)` | `create_meal_record` / `create_body_metric_record` / `generate_daily_summary` |
-| `status` | `VARCHAR(32)` | `needs_clarification` / `pending_confirmation` / `confirmed` / `discarded` / `committed` / `expired` |
+| `action_type` | `VARCHAR(64)` | `create_meal_record` / `create_body_metric_record` / `create_workout_record` |
+| `status` | `VARCHAR(32)` | `needs_clarification` / `pending_confirmation` / `discarded` / `committed` / `expired` |
 | `draft_payload_json` | `JSON` | 用户可编辑草稿 |
 | `warnings_json` | `JSON` NULL | 待确认字段、低置信原因 |
 | `confidence` | `DECIMAL(5,4)` NULL | 置信度 |
 | `confirmed_at` | `DATETIME(6)` NULL | 用户确认时间 |
-| `committed_record_type` | `VARCHAR(32)` NULL | `meal` / `body_metric` / `summary` |
+| `committed_record_type` | `VARCHAR(32)` NULL | `meal` / `body_metric` |
 | `committed_record_id` | `VARCHAR(40)` NULL | 正式记录 ID |
 | `expires_at` | `DATETIME(6)` NULL | 过期时间 |
 | `created_at` | `DATETIME(6)` | 创建时间 |

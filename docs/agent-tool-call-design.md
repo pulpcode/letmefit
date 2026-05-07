@@ -20,12 +20,13 @@ User message
 记录工具遵循异步确认语义：
 
 - `pending_confirmation`：创建确认卡后立即结束当前 HTTP 请求，trace 追加 `human_confirmation_required`，等待用户动作。
-- `committed`：作为普通 tool observation 回填，允许本次 loop 继续。
+- `needs_clarification`：创建需要补充信息的确认卡后立即结束当前 HTTP 请求，等待用户补充或放弃。
+- `committed`：用户确认已有确认卡后写入正式记录，作为普通 tool observation 回填。
 - `rejected`：作为普通 tool observation 回填，允许模型下一轮追问或解释失败原因。
 
-用户确认、修改后确认、放弃确认卡时，正式客户端默认通过 pending action 接口传入 `continue_agent=true`。后端会把该动作构造成 `pending_action_observation`，作为新一轮 ReAct 的当前输入交给模型，让模型判断是否还有剩余问题需要继续处理。这里不会把按钮文案“确认”当作普通用户消息发送给模型。
+用户确认、修改后确认、放弃确认卡时，正式客户端默认先由后端接口处理状态和写入。只有需要继续总结、回答剩余问题或客户端显式请求时，才传入 `continue_agent=true`；后端会把该动作构造成 `pending_action_observation`，作为新一轮 ReAct 的当前输入交给模型。这里不会把按钮文案“确认”当作普通用户消息发送给模型。
 
-用户给出修改意见时优先更新现有 pending action，而不是创建新草稿。结构化编辑直接 PATCH `draft_payload`；普通聊天中的自然语言修改交给 LLM 判断，LLM 应调用 `update_pending_action` 工具更新原草稿。用户明确表达保存或确认待确认草稿时，LLM 应调用 `commit_pending_action` 工具。后端不靠关键词判断“修改/保存”意图，只校验工具调用引用的 pending action、当前用户消息 evidence、用户归属和状态。
+用户给出修改意见时优先更新现有 pending action，而不是创建新草稿。结构化编辑直接 PATCH `draft_payload`；普通聊天中的自然语言修改交给 LLM 判断，LLM 应调用 `update_pending_action` 工具更新原草稿。用户明确表达保存或确认待确认草稿时，LLM 应调用 `commit_pending_action`；批量确认/放弃时调用 `commit_pending_actions` / `discard_pending_actions`。后端不靠关键词判断“修改/保存”意图，只校验工具调用引用的 pending action、当前用户消息 evidence、用户归属、状态和过期时间。
 
 外部 REST API 保持兼容：`POST /conversations/{id}/messages` 仍返回 `pending_actions`、`committed_records` 和 `tool_results`。调试时可通过请求字段 `include_agent_trace=true` 额外返回脱敏 `agent_trace`。
 
@@ -149,8 +150,8 @@ record_trend_stats
 
 分级规则：
 
-- `current_user_message` / `normalized_media_text`: 可进入后端自动保存判断。
-- `recent_user_message` / `active_pending_action` / `tool_result`: 可创建确认卡，默认不能自动保存。
+- `current_user_message` / `normalized_media_text`: 可创建确认卡。
+- `recent_user_message` / `active_pending_action` / `tool_result`: 可创建确认卡。
 - `assistant_plan`: 最多创建确认卡，不能自动保存。
 - `confirmed_record`: 只能用于回答和总结，不能直接生成新记录。
 - `model_inference`: 不能写记录，只能回答或追问。
@@ -180,8 +181,9 @@ record_trend_stats
 记录工具状态：
 
 - `rejected`: guard 拒绝，未创建确认卡，未保存记录。
-- `pending_confirmation`: 已创建确认卡，等待用户确认或修改。
-- `committed`: 后端规则判定可自动写入，已保存正式记录。
+- `pending_confirmation`: 已创建可确认保存的确认卡，等待用户确认、修改或放弃。
+- `needs_clarification`: 已创建候选卡，但关键字段不足或冲突，等待用户补充或放弃。
+- `committed`: 用户确认待确认动作后，后端已保存正式记录。
 
 只读工具状态：
 
@@ -264,7 +266,7 @@ loop_limit_reached
 
 后端响应文案规则：
 
-- 有 `committed_records`：后端生成“已自动保存...”事件和文案。
+- 有 `committed_records`：后端生成“已保存...”事件和文案。
 - 有 `pending_actions`：后端生成“草稿，尚未保存，请确认或修改后再保存”文案。
 - tool call 被拒绝且模型声称“已保存/已记录”：后端覆盖为“尚未保存”安全文案。
 - 没有工具执行结果且没有保存声明：保留模型普通回答。

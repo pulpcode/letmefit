@@ -12,7 +12,11 @@ from app.ai.types import (
     ToolName,
 )
 
-ActionType = Literal["create_meal_record", "create_body_metric_record"]
+ActionType = Literal[
+    "create_meal_record",
+    "create_body_metric_record",
+    "create_workout_record",
+]
 
 
 class ExtractionWarningOutput(BaseModel):
@@ -69,6 +73,8 @@ class PendingActionOutput(BaseModel):
             return "propose_meal_record"
         if self.action_type == "create_body_metric_record":
             return "propose_body_metric_record"
+        if self.action_type == "create_workout_record":
+            return "propose_workout_record"
         raise ValueError(f"Unsupported pending action type: {self.action_type}")
 
 

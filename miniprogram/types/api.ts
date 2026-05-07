@@ -148,17 +148,18 @@ export type ConversationMessage = {
   created_at: string;
 };
 
-export type PendingActionType = "create_meal_record" | "create_body_metric_record" | "generate_daily_summary" | "answer_fitness_question" | "out_of_scope";
+export type PendingActionType = "create_meal_record" | "create_body_metric_record" | "create_workout_record" | "generate_daily_summary" | "answer_fitness_question" | "out_of_scope";
 
 export type PendingAction = {
   pending_action_id: string;
   type: PendingActionType;
-  status: "pending_confirmation" | "committed" | "discarded";
+  status: "pending_confirmation" | "needs_clarification" | "committed" | "discarded" | "expired";
   confidence?: number | null;
   draft_payload: MealRecord | BodyMetricRecord | Record<string, unknown>;
   warnings?: Array<{ field?: string; reason?: string }>;
   created_at?: string;
   updated_at?: string;
+  expires_at?: string;
 };
 
 export type SendMessageResponse = {

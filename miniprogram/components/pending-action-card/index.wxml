@@ -1,7 +1,7 @@
 <view wx:if="{{card}}" class="pending-card">
   <view class="pending-head">
     <view class="pending-dot"></view>
-    <text class="pending-title">请确认后保存</text>
+    <text class="pending-title">{{card.needsClarification ? '请补充信息' : '请确认后保存'}}</text>
   </view>
 
   <view wx:if="{{card.kind === 'meal'}}" class="pending-body">
@@ -53,6 +53,16 @@
     </view>
   </view>
 
+  <view wx:elif="{{card.kind === 'workout'}}" class="pending-body">
+    <view class="record-title">锻炼记录</view>
+    <view class="metric-list">
+      <view wx:for="{{card.fields}}" wx:key="label" class="metric-row">
+        <text>{{item.label}}</text>
+        <text>{{item.value}}</text>
+      </view>
+    </view>
+  </view>
+
   <view wx:else class="pending-body">
     <text class="muted">这条结果需要确认后再保存。</text>
   </view>
@@ -61,9 +71,9 @@
     <text>{{card.warningText}}</text>
   </view>
 
-  <view class="pending-actions">
+  <view class="pending-actions {{card.needsClarification ? 'pending-actions-clarify' : ''}}">
     <button class="action-btn discard" bindtap="onDiscard">放弃</button>
     <button class="action-btn edit" bindtap="onEdit">修改</button>
-    <button class="action-btn confirm" bindtap="onConfirm">确认保存</button>
+    <button wx:if="{{!card.needsClarification}}" class="action-btn confirm" bindtap="onConfirm">确认保存</button>
   </view>
 </view>

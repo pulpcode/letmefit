@@ -125,7 +125,7 @@ def test_offer_patch_with_forbidden_record_data_is_ignored() -> None:
     assert offer is None
 
 
-def test_offer_patch_surface_text_must_match_assistant_text() -> None:
+def test_offer_patch_surface_text_is_debug_description_only() -> None:
     patch = _offer_patch()
     patch["new_active_offer"]["surface_text"] = "我可以帮你制定训练计划。"
 
@@ -136,4 +136,5 @@ def test_offer_patch_surface_text_must_match_assistant_text() -> None:
         created_at=datetime(2026, 5, 5, 20, 0, 0),
     )
 
-    assert offer is None
+    assert offer is not None
+    assert offer["surface_text"] == "我可以帮你制定训练计划。"

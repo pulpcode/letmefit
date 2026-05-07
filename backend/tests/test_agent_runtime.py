@@ -219,7 +219,7 @@ def test_agent_runtime_pauses_when_record_tool_requires_human_confirmation() -> 
                             "recorded_at": "2026-05-06T12:30:00+08:00",
                             "source_type": "text",
                             "meal_type": "lunch",
-                            "items": [{"name": "炒面", "portion_text": "一份"}],
+                            "items": [{"name": "炒面", "portion_text": "300g"}],
                         },
                         grounding=ActionGrounding(
                             source="current_user_message",
@@ -252,8 +252,7 @@ def test_agent_runtime_pauses_when_record_tool_requires_human_confirmation() -> 
     assert result["agent_trace"][-1]["event"] == "human_confirmation_required"
 
 
-def test_agent_runtime_continues_after_auto_committed_record(monkeypatch) -> None:
-    monkeypatch.setattr("app.ai.extraction_service.BodyMetricService", FakeBodyMetricService)
+def test_agent_runtime_pauses_for_clear_body_metric_confirmation() -> None:
     provider = SequenceProvider(
         [
             ExtractionProviderResult(
@@ -277,12 +276,6 @@ def test_agent_runtime_continues_after_auto_committed_record(monkeypatch) -> Non
                     )
                 ],
             ),
-            ExtractionProviderResult(
-                assistant_text="体重已记录，今天训练建议轻量力量训练。",
-                intent="answer_fitness_question",
-                requires_review=False,
-                confidence=Decimal("0.80"),
-            ),
         ]
     )
     runtime = _runtime(provider)
@@ -295,14 +288,11 @@ def test_agent_runtime_continues_after_auto_committed_record(monkeypatch) -> Non
         context={},
     )
 
-    assert len(provider.payloads) == 2
-    assert result["committed_records"][0]["type"] == "body_metric"
-    assert result["assistant_text"] == (
-        "已自动保存：体重 72.4kg。可在记录页修改或删除。"
-        " 体重已记录，今天训练建议轻量力量训练。"
-    )
-    assert result["assistant_content"][-1]["text"] == "体重已记录，今天训练建议轻量力量训练。"
-    assert any(event["event"] == "final_answer" for event in result["agent_trace"])
+    assert len(provider.payloads) == 1
+    assert result["committed_records"] == []
+    assert result["pending_actions"][0]["type"] == "create_body_metric_record"
+    assert result["pending_actions"][0]["status"] == "pending_confirmation"
+    assert result["agent_trace"][-1]["event"] == "human_confirmation_required"
 
 
 def test_agent_runtime_stops_when_model_turn_limit_is_reached(monkeypatch) -> None:

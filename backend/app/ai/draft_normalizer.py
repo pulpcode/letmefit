@@ -76,7 +76,11 @@ def _normalize_meal_recorded_at(
     timezone = ZoneInfo(str(draft_payload.get("recorded_tz") or "Asia/Shanghai"))
     local_now = _local_now(now, timezone)
     meal_type = draft_payload.get("meal_type")
-    if meal_type == "snack" or meal_type == "unknown" or _current_window_matches(meal_type, local_now):
+    if (
+        meal_type == "snack"
+        or meal_type == "unknown"
+        or _current_window_matches(meal_type, local_now)
+    ):
         local_time = local_now.replace(second=0, microsecond=0)
     else:
         default_time = DEFAULT_MEAL_TIMES.get(str(meal_type))

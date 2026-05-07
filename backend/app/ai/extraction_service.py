@@ -4,10 +4,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.ai.commit_rules import CommitDecision, decide_auto_commit
 from app.ai.draft_normalizer import normalize_pending_action_draft
 from app.ai.providers import ExtractionProvider, get_extraction_provider
 from app.ai.types import (
@@ -18,12 +16,18 @@ from app.ai.types import (
 )
 from app.auth.security import new_id, utc_now
 from app.core.config import Settings, get_settings
+from app.core.errors import AppError
 from app.models import AgentExtraction, AgentPendingAction
 from app.schemas.conversation import MessageContentItem
 from app.schemas.pending_action import decimal_to_float
-from app.schemas.records import BodyMetricCreateRequest, MealCreateRequest
 from app.services.body_metrics import BodyMetricService
 from app.services.meals import MealService
+from app.services.pending_action_lifecycle import (
+    PENDING_CONFIRMATION,
+    classify_pending_action_status,
+    normalize_status_warnings,
+    pending_action_expires_at,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +142,12 @@ class ExtractionService:
                 result = self._execute_pending_action_tool(tool_call=tool_call, user_id=user_id)
                 if result.get("pending_action") is not None:
                     pending_actions.append(result["pending_action"])
+                if result.get("pending_actions") is not None:
+                    pending_actions.extend(result["pending_actions"])
                 if result.get("committed_record") is not None:
                     committed_records.append(result["committed_record"])
+                if result.get("committed_records") is not None:
+                    committed_records.extend(result["committed_records"])
                 tool_results.append(result["tool_result"])
                 continue
 
@@ -153,56 +161,12 @@ class ExtractionService:
                 now=utc_now(),
             )
             confidence = self._action_confidence(action_spec, provider_result, draft_payload)
-            auto_commit_allowed = self._auto_commit_allowed(tool_call)
-            if auto_commit_allowed:
-                decision = decide_auto_commit(
-                    action_type=action_spec.action_type,
-                    draft_payload=draft_payload,
-                    confidence=confidence,
-                    warnings=action_spec.warnings,
-                    provider_warnings=provider_result.warnings,
-                    input_types=self._input_types(content),
-                    input_text=input_text,
-                    input_normalization=context.get("input_normalization"),
-                )
-            else:
-                decision = CommitDecision(False, "grounding_requires_confirmation")
-            if decision.auto_commit:
-                try:
-                    record = self._auto_commit_action(
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                        action_type=action_spec.action_type,
-                        draft_payload=draft_payload,
-                        confidence=confidence,
-                        decision_reason=decision.reason,
-                    )
-                    committed_records.append(record)
-                    tool_results.append(self._tool_result(tool_call, "committed", record=record))
-                except ValidationError:
-                    action = self._create_pending_action(
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                        extraction_id=extraction.id,
-                        confidence=confidence,
-                        action_type=action_spec.action_type,
-                        draft_payload=draft_payload,
-                        warnings=[
-                            *action_spec.warnings,
-                            {
-                                "field": "draft_payload",
-                                "reason": "auto_commit_validation_failed",
-                            },
-                        ],
-                    )
-                    pending_actions.append(action)
-                    tool_results.append(
-                        self._tool_result(tool_call, "pending_confirmation", action=action)
-                    )
-                continue
-
+            warnings = self._record_action_warnings(tool_call, action_spec.warnings)
+            status = classify_pending_action_status(
+                action_spec.action_type,
+                draft_payload,
+                warnings=warnings,
+            )
             action = self._create_pending_action(
                 user_id=user_id,
                 conversation_id=conversation_id,
@@ -211,17 +175,11 @@ class ExtractionService:
                 confidence=confidence,
                 action_type=action_spec.action_type,
                 draft_payload=draft_payload,
-                warnings=[
-                    *action_spec.warnings,
-                    *(
-                        [{"field": "grounding", "reason": decision.reason}]
-                        if not auto_commit_allowed
-                        else []
-                    ),
-                ],
+                warnings=normalize_status_warnings(status, warnings),
+                status=status,
             )
             pending_actions.append(action)
-            tool_results.append(self._tool_result(tool_call, "pending_confirmation", action=action))
+            tool_results.append(self._tool_result(tool_call, status, action=action))
         if extraction:
             extraction.requires_confirmation = bool(pending_actions)
         return {
@@ -353,7 +311,7 @@ class ExtractionService:
             return "assistant_plan"
         return str(source)
 
-    def _auto_commit_allowed(self, tool_call: ExtractionToolCall) -> bool:
+    def _has_direct_record_grounding(self, tool_call: ExtractionToolCall) -> bool:
         if not tool_call.grounding:
             return False
         return self._normalized_grounding_source(tool_call.grounding.source) in {
@@ -361,16 +319,32 @@ class ExtractionService:
             "normalized_media_text",
         }
 
+    def _record_action_warnings(
+        self,
+        tool_call: ExtractionToolCall,
+        warnings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        normalized = list(warnings)
+        if self._has_direct_record_grounding(tool_call):
+            return normalized
+        if any(item.get("reason") == "grounding_requires_confirmation" for item in normalized):
+            return normalized
+        normalized.append({"field": "grounding", "reason": "grounding_requires_confirmation"})
+        return normalized
+
     def _pending_action_tool_drop_reason(
         self,
         tool_call: ExtractionToolCall,
         input_text: str,
         context: dict[str, Any],
     ) -> str | None:
-        pending_action_id = str(tool_call.arguments.get("pending_action_id") or "").strip()
-        if not pending_action_id:
+        pending_action_ids = self._pending_action_ids_from_tool_call(tool_call)
+        if not pending_action_ids:
             return "pending_action_id_missing"
-        if not self._active_pending_action_exists(pending_action_id, context):
+        if not all(
+            self._active_pending_action_exists(pending_action_id, context)
+            for pending_action_id in pending_action_ids
+        ):
             return "active_pending_action_not_found"
 
         grounding = tool_call.grounding
@@ -385,6 +359,15 @@ class ExtractionService:
         if evidence_text not in input_text:
             return "evidence_not_in_current_message"
         return None
+
+    def _pending_action_ids_from_tool_call(self, tool_call: ExtractionToolCall) -> list[str]:
+        if tool_call.name in {"commit_pending_actions", "discard_pending_actions"}:
+            value = tool_call.arguments.get("pending_action_ids")
+            if not isinstance(value, list):
+                return []
+            return [str(item).strip() for item in value if str(item or "").strip()]
+        pending_action_id = str(tool_call.arguments.get("pending_action_id") or "").strip()
+        return [pending_action_id] if pending_action_id else []
 
     def _active_pending_action_exists(
         self,
@@ -441,21 +424,47 @@ class ExtractionService:
                         reason="draft_payload_missing",
                     )
                 }
-            updated_action = service.update_action(
-                user_id,
-                pending_action_id,
-                PendingActionUpdateRequest(
-                    draft_payload=draft_payload,
-                    user_note=tool_call.arguments.get("user_note"),
-                ),
-                commit=False,
+            try:
+                updated_action = service.update_action(
+                    user_id,
+                    pending_action_id,
+                    PendingActionUpdateRequest(
+                        draft_payload=draft_payload,
+                        user_note=tool_call.arguments.get("user_note"),
+                    ),
+                    commit=False,
+                )
+            except AppError as exc:
+                return {
+                    "tool_result": self._tool_result(
+                        tool_call,
+                        "rejected",
+                        reason=exc.code,
+                    )
+                }
+            tool_result = self._tool_result(
+                tool_call,
+                str(updated_action.get("status") or "pending_confirmation"),
+                data=updated_action,
             )
-            tool_result = self._tool_result(tool_call, "pending_confirmation", data=updated_action)
             tool_result["pending_action_id"] = pending_action_id
             return {"pending_action": updated_action, "tool_result": tool_result}
 
         if tool_call.name == "commit_pending_action":
-            committed = service.commit_action_for_agent(user_id, pending_action_id)
+            try:
+                committed = service.commit_action_for_agent(
+                    user_id,
+                    pending_action_id,
+                    draft_payload_patch=tool_call.arguments.get("draft_payload_patch"),
+                )
+            except AppError as exc:
+                return {
+                    "tool_result": self._tool_result(
+                        tool_call,
+                        "rejected",
+                        reason=exc.code,
+                    )
+                }
             record = {
                 "type": committed["record_type"],
                 "record_id": committed["record_id"],
@@ -469,6 +478,54 @@ class ExtractionService:
             return {
                 "committed_record": record,
                 "tool_result": self._tool_result(tool_call, "committed", record=record),
+            }
+
+        if tool_call.name == "commit_pending_actions":
+            pending_action_ids = self._pending_action_ids_from_tool_call(tool_call)
+            result = service.commit_actions_for_agent(user_id, pending_action_ids)
+            committed_records = [
+                {
+                    "type": item["record_type"],
+                    "record_id": item["record_id"],
+                    "record": item["record"],
+                    "source": "pending_action_commit",
+                    "source_message_id": item["source_message_id"],
+                    "confidence": item["confidence"],
+                    "decision_reason": "llm_judged_user_confirmed_pending_actions",
+                    "message": item["message"],
+                }
+                for item in result["committed"]
+            ]
+            status = "committed" if not result["failed"] else "partial_committed"
+            return {
+                "committed_records": committed_records,
+                "tool_result": {
+                    "tool_name": tool_call.name,
+                    "action_type": tool_call.action_type,
+                    "status": status,
+                    "committed": [
+                        {
+                            "pending_action_id": item["pending_action_id"],
+                            "record_type": item["record_type"],
+                            "record_id": item["record_id"],
+                        }
+                        for item in result["committed"]
+                    ],
+                    "failed": result["failed"],
+                },
+            }
+
+        if tool_call.name == "discard_pending_actions":
+            pending_action_ids = self._pending_action_ids_from_tool_call(tool_call)
+            result = service.discard_actions_for_agent(user_id, pending_action_ids)
+            return {
+                "tool_result": {
+                    "tool_name": tool_call.name,
+                    "action_type": tool_call.action_type,
+                    "status": "discarded" if not result["failed"] else "partial_discarded",
+                    "discarded": result["discarded"],
+                    "failed": result["failed"],
+                }
             }
 
         return {
@@ -626,7 +683,9 @@ class ExtractionService:
         action_type: str,
         draft_payload: dict[str, Any],
         warnings: list[dict[str, Any]],
+        status: str = PENDING_CONFIRMATION,
     ) -> AgentPendingAction:
+        now = utc_now()
         action = AgentPendingAction(
             id=new_id("pa"),
             user_id=user_id,
@@ -634,47 +693,17 @@ class ExtractionService:
             source_message_id=message_id,
             extraction_id=extraction_id,
             action_type=action_type,
-            status="pending_confirmation",
+            status=status,
             draft_payload_json=draft_payload,
             warnings_json=warnings,
             confidence=confidence or Decimal("0"),
+            expires_at=pending_action_expires_at(now),
+            created_at=now,
+            updated_at=now,
         )
         self.db.add(action)
         self.db.flush()
         return action
-
-    def _auto_commit_action(
-        self,
-        user_id: str,
-        conversation_id: str,
-        message_id: str,
-        action_type: str,
-        draft_payload: dict[str, Any],
-        confidence: Decimal | None,
-        decision_reason: str,
-    ) -> dict[str, Any]:
-        if action_type == "create_meal_record":
-            payload = MealCreateRequest.model_validate(draft_payload)
-            record = MealService(self.db).create_meal(user_id, payload, commit=False)
-            record_type = "meal"
-        elif action_type == "create_body_metric_record":
-            payload = BodyMetricCreateRequest.model_validate(draft_payload)
-            record = BodyMetricService(self.db).create_body_metric(user_id, payload, commit=False)
-            record_type = "body_metric"
-        else:
-            raise ValueError(f"Unsupported auto commit action: {action_type}")
-
-        message = self._auto_commit_text(record_type, record)
-        return {
-            "type": record_type,
-            "record_id": record["id"],
-            "record": record,
-            "source": "auto_commit",
-            "source_message_id": message_id,
-            "confidence": decimal_to_float(confidence),
-            "decision_reason": decision_reason,
-            "message": message,
-        }
 
     def _result_response(
         self,
@@ -719,6 +748,7 @@ class ExtractionService:
             "warnings": action.warnings_json or [],
             "created_at": action.created_at,
             "updated_at": action.updated_at,
+            "expires_at": action.expires_at,
         }
 
     def _input_types(self, content: list[MessageContentItem]) -> list[str]:
@@ -771,7 +801,7 @@ class ExtractionService:
             content = [
                 {
                     "type": "event",
-                    "event_type": "record_auto_committed",
+                    "event_type": "record_committed",
                     "text": item["message"],
                     "record_type": item["type"],
                     "record_id": item["record_id"],
@@ -801,6 +831,11 @@ class ExtractionService:
         ]
 
     def _pending_actions_text(self, pending_actions: list[dict]) -> str:
+        if any(action.get("status") == "needs_clarification" for action in pending_actions):
+            return (
+                "我整理出一条候选记录，但还有关键信息需要补充，"
+                "请先补充或修改后再保存。"
+            )
         if len(pending_actions) == 1:
             action_type = pending_actions[0].get("type")
             if action_type == "create_meal_record":
@@ -812,6 +847,11 @@ class ExtractionService:
                 return (
                     "我整理出一条身体指标草稿，尚未保存为正式记录，"
                     "请确认或修改后再保存。确认后我会根据确认结果继续处理这轮剩余问题。"
+                )
+            if action_type == "create_workout_record":
+                return (
+                    "我整理出一条锻炼记录草稿，尚未保存为正式记录，"
+                    "请确认或修改后再保存。"
                 )
         return (
             f"我整理出 {len(pending_actions)} 条记录草稿，尚未保存为正式记录，"
@@ -834,30 +874,6 @@ class ExtractionService:
             "这份内容尚未保存为正式记录。当前只会记录你本轮明确说出的实际饮食或身体指标。"
             "如果你已经实际吃了这份内容，请直接告诉我实际吃了什么，我再帮你记录。"
         )
-
-    def _auto_commit_text(self, record_type: str, record: dict[str, Any]) -> str:
-        if record_type == "meal":
-            meal_label = {
-                "breakfast": "早餐",
-                "lunch": "午餐",
-                "dinner": "晚餐",
-                "snack": "加餐",
-                "unknown": "餐食",
-            }.get(record.get("meal_type") or "unknown", "餐食")
-            item_text = self._meal_items_text(record.get("items") or [])
-            if item_text:
-                return f"已自动保存：{meal_label}，{item_text}。可在记录页修改或删除。"
-            return f"已自动保存：{meal_label}。可在记录页修改或删除。"
-
-        parts = []
-        if record.get("weight_kg") is not None:
-            parts.append(f"体重 {record['weight_kg']:g}kg")
-        if record.get("body_fat_percentage") is not None:
-            parts.append(f"体脂 {record['body_fat_percentage']:g}%")
-        if record.get("bmi") is not None:
-            parts.append(f"BMI {record['bmi']:g}")
-        detail = "，".join(parts) if parts else "身体指标"
-        return f"已自动保存：{detail}。可在记录页修改或删除。"
 
     def _meal_items_text(self, items: list[dict]) -> str:
         parts = []

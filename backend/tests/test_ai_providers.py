@@ -225,7 +225,10 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     assert "只有 active_pending_actions" in "".join(prompt_json["context_contract"]["rules"])
     assert "优先读取 recent_records" in "".join(prompt_json["context_contract"]["rules"])
     assert "不是正式事实来源" in "".join(prompt_json["context_contract"]["rules"])
-    assert "active_offer 在本轮结束后会失效" in "".join(
+    assert "active_offer 会在本轮响应生成完成后清除" in "".join(
+        prompt_json["context_contract"]["rules"]
+    )
+    assert "expected_followup 是给下一轮模型使用的续聊提示" in "".join(
         prompt_json["context_contract"]["rules"]
     )
     assert "记录类 tool_calls 必须带 grounding" in "".join(

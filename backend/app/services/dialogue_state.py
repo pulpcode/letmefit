@@ -78,8 +78,8 @@ def update_dialogue_state_after_assistant(
 ) -> dict[str, Any]:
     state = normalize_dialogue_state(previous_state)
 
-    # active_offer is a one-turn token. The previous token expires after this user turn,
-    # whether the user accepted it, ignored it, or changed topic.
+    # active_offer is a one-turn token. The previous token stays available while this
+    # user turn is processed, then expires when the new assistant response is stored.
     state["ephemeral_state"].pop("active_offer", None)
 
     new_offer = active_offer_from_patch(
@@ -113,7 +113,7 @@ def active_offer_from_patch(
         return None
 
     surface_text = _clean_text(offer.get("surface_text"), MAX_SURFACE_TEXT_CHARS)
-    if not surface_text or not _matches_assistant_text(surface_text, assistant_text):
+    if not surface_text:
         return None
 
     referent = _referent(offer.get("referent"))
@@ -151,13 +151,6 @@ def _clean_text(value: Any, max_chars: int) -> str | None:
     if not text:
         return None
     return text[:max_chars]
-
-
-def _matches_assistant_text(surface_text: str, assistant_text: str) -> bool:
-    assistant = assistant_text.strip()
-    if not assistant:
-        return False
-    return surface_text in assistant or assistant in surface_text
 
 
 def _contains_forbidden_key(value: Any) -> bool:

@@ -1,5 +1,6 @@
 import logging
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -27,10 +28,26 @@ from app.services.dialogue_state import (
     update_dialogue_state_after_assistant,
 )
 from app.services.meals import MealService
+from app.services.pending_action_lifecycle import (
+    CONFIRMABLE_PENDING_ACTION_STATUS,
+    EDITABLE_PENDING_ACTION_STATUSES,
+    EXPIRED,
+    NEEDS_CLARIFICATION,
+    classify_pending_action_status,
+    normalize_status_warnings,
+    pending_action_is_expired,
+)
 
 logger = logging.getLogger(__name__)
 
-EDITABLE_STATUSES = {"needs_clarification", "pending_confirmation"}
+
+EDITABLE_STATUSES = EDITABLE_PENDING_ACTION_STATUSES
+
+
+@dataclass(frozen=True)
+class PendingActionCommitHandler:
+    record_type: str
+    commit_method: str
 
 
 class PendingActionService:
@@ -49,6 +66,14 @@ class PendingActionService:
                 .order_by(AgentPendingAction.created_at.asc())
             )
         )
+        now = utc_now()
+        expired_count = 0
+        for action in actions:
+            if action.status in EDITABLE_STATUSES and pending_action_is_expired(action, now):
+                action.status = EXPIRED
+                expired_count += 1
+        if expired_count:
+            self.db.commit()
         return {"pending_actions": [self._response(action) for action in actions]}
 
     def update_action(
@@ -64,8 +89,11 @@ class PendingActionService:
         draft_payload.update(payload.draft_payload)
         if payload.user_note:
             draft_payload["user_note"] = payload.user_note
-        action.draft_payload_json = draft_payload
-        action.status = "pending_confirmation"
+        action.draft_payload_json = normalize_pending_action_draft(
+            action.action_type,
+            draft_payload,
+        )
+        self._apply_status_from_draft(action)
         if commit:
             self.db.commit()
             self.db.refresh(action)
@@ -73,7 +101,12 @@ class PendingActionService:
             self.db.flush()
         return self._response(action)
 
-    def commit_action_for_agent(self, user_id: str, pending_action_id: str) -> dict[str, Any]:
+    def commit_action_for_agent(
+        self,
+        user_id: str,
+        pending_action_id: str,
+        draft_payload_patch: Any = None,
+    ) -> dict[str, Any]:
         action = self._get_owned_action(user_id, pending_action_id, lock=True)
         if action.status == "committed":
             return {
@@ -85,38 +118,40 @@ class PendingActionService:
                 "source_message_id": action.source_message_id,
                 "confidence": decimal_to_float(action.confidence),
             }
-        self._ensure_editable(action)
-        if action.action_type == "create_meal_record":
-            record = self._commit_meal(user_id, action)
-            record_type = "meal"
-        elif action.action_type == "create_body_metric_record":
-            record = self._commit_body_metric(user_id, action)
-            record_type = "body_metric"
-        else:
-            raise AppError("VALIDATION_ERROR", "该待确认动作暂不支持确认写入", status_code=422)
+        if draft_payload_patch is not None:
+            if not isinstance(draft_payload_patch, dict):
+                raise AppError("VALIDATION_ERROR", "草稿修改内容不正确", status_code=422)
+            self._ensure_editable(action)
+            draft_payload = deepcopy(action.draft_payload_json or {})
+            draft_payload.update(draft_payload_patch)
+            action.draft_payload_json = normalize_pending_action_draft(
+                action.action_type,
+                draft_payload,
+            )
+            self._apply_status_from_draft(action)
+        self._ensure_confirmable(action)
+        return self._commit_action(user_id, action)
 
-        action.status = "committed"
-        action.confirmed_at = utc_now()
-        action.committed_record_type = record_type
-        action.committed_record_id = record["id"]
-        message = self._record_committed_text(record_type, record)
-        self._add_action_event(
-            action=action,
-            event_type="record_committed",
-            text=message,
-            record_type=record_type,
-            record_id=record["id"],
-        )
-        self.db.flush()
-        return {
-            "pending_action_id": action.id,
-            "record_type": record_type,
-            "record_id": record["id"],
-            "record": record,
-            "message": message,
-            "source_message_id": action.source_message_id,
-            "confidence": decimal_to_float(action.confidence),
-        }
+    def commit_actions_for_agent(
+        self,
+        user_id: str,
+        pending_action_ids: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        committed = []
+        failed = []
+        for pending_action_id in pending_action_ids:
+            try:
+                committed.append(self.commit_action_for_agent(user_id, pending_action_id))
+            except AppError as exc:
+                failed.append(
+                    {
+                        "pending_action_id": pending_action_id,
+                        "code": exc.code,
+                        "message": exc.message,
+                        "details": exc.details,
+                    }
+                )
+        return {"committed": committed, "failed": failed}
 
     def confirm_action(
         self,
@@ -128,35 +163,16 @@ class PendingActionService:
         action = self._get_owned_action(user_id, pending_action_id, lock=True)
         if action.status == "committed":
             return self._committed_response(action)
-        self._ensure_editable(action)
-        if action.action_type == "create_meal_record":
-            record = self._commit_meal(user_id, action)
-            record_type = "meal"
-        elif action.action_type == "create_body_metric_record":
-            record = self._commit_body_metric(user_id, action)
-            record_type = "body_metric"
-        else:
-            raise AppError("VALIDATION_ERROR", "该待确认动作暂不支持确认写入", status_code=422)
-
-        action.status = "committed"
-        action.confirmed_at = utc_now()
-        action.committed_record_type = record_type
-        action.committed_record_id = record["id"]
-        event_message = self._add_action_event(
-            action=action,
-            event_type="record_committed",
-            text=self._record_committed_text(record_type, record),
-            record_type=record_type,
-            record_id=record["id"],
-        )
-        event_message_id = event_message.id
+        self._ensure_confirmable(action)
+        committed = self._commit_action(user_id, action)
+        event_message_id = committed["event_message_id"]
         self.db.commit()
         response = self._committed_response(action)
         if payload.continue_agent:
             observation = self._confirmed_observation(
                 action=action,
-                record_type=record_type,
-                record=record,
+                record_type=committed["record_type"],
+                record=committed["record"],
             )
             continuation = self._run_continuation(
                 action=action,
@@ -206,6 +222,39 @@ class PendingActionService:
                 response["continuation"] = continuation
         return response
 
+    def discard_actions_for_agent(
+        self,
+        user_id: str,
+        pending_action_ids: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        discarded = []
+        failed = []
+        for pending_action_id in pending_action_ids:
+            try:
+                action = self._get_owned_action(user_id, pending_action_id, lock=True)
+                if action.status == "discarded":
+                    discarded.append({"pending_action_id": action.id, "status": action.status})
+                    continue
+                self._ensure_editable(action)
+                action.status = "discarded"
+                self._add_action_event(
+                    action=action,
+                    event_type="pending_action_discarded",
+                    text="已放弃这条候选记录。",
+                )
+                self.db.flush()
+                discarded.append({"pending_action_id": action.id, "status": action.status})
+            except AppError as exc:
+                failed.append(
+                    {
+                        "pending_action_id": pending_action_id,
+                        "code": exc.code,
+                        "message": exc.message,
+                        "details": exc.details,
+                    }
+                )
+        return {"discarded": discarded, "failed": failed}
+
     def _commit_meal(self, user_id: str, action: AgentPendingAction) -> dict:
         draft_payload = self._draft_with_source(action)
         try:
@@ -231,6 +280,50 @@ class PendingActionService:
                 details={"errors": exc.errors()},
             ) from exc
         return BodyMetricService(self.db).create_body_metric(user_id, payload, commit=False)
+
+    def _commit_action(self, user_id: str, action: AgentPendingAction) -> dict[str, Any]:
+        handler = self._commit_handler(action.action_type)
+        commit_method = getattr(self, handler.commit_method)
+        record = commit_method(user_id, action)
+        action.status = "committed"
+        action.confirmed_at = utc_now()
+        action.committed_record_type = handler.record_type
+        action.committed_record_id = record["id"]
+        message = self._record_committed_text(handler.record_type, record)
+        event_message = self._add_action_event(
+            action=action,
+            event_type="record_committed",
+            text=message,
+            record_type=handler.record_type,
+            record_id=record["id"],
+        )
+        self.db.flush()
+        return {
+            "pending_action_id": action.id,
+            "record_type": handler.record_type,
+            "record_id": record["id"],
+            "record": record,
+            "message": message,
+            "event_message_id": event_message.id,
+            "source_message_id": action.source_message_id,
+            "confidence": decimal_to_float(action.confidence),
+        }
+
+    def _commit_handler(self, action_type: str) -> PendingActionCommitHandler:
+        handlers = {
+            "create_meal_record": PendingActionCommitHandler(
+                record_type="meal",
+                commit_method="_commit_meal",
+            ),
+            "create_body_metric_record": PendingActionCommitHandler(
+                record_type="body_metric",
+                commit_method="_commit_body_metric",
+            ),
+        }
+        handler = handlers.get(action_type)
+        if handler is None:
+            raise AppError("VALIDATION_ERROR", "该待确认动作暂不支持确认写入", status_code=422)
+        return handler
 
     def _draft_with_source(self, action: AgentPendingAction) -> dict[str, Any]:
         draft_payload = normalize_pending_action_draft(
@@ -272,8 +365,52 @@ class PendingActionService:
         return action
 
     def _ensure_editable(self, action: AgentPendingAction) -> None:
+        self._expire_action_if_needed(action)
         if action.status not in EDITABLE_STATUSES:
             raise AppError("VALIDATION_ERROR", "待确认动作已处理，不能再次修改", status_code=422)
+
+    def _ensure_confirmable(self, action: AgentPendingAction) -> None:
+        self._expire_action_if_needed(action)
+        if action.status == NEEDS_CLARIFICATION:
+            raise AppError(
+                "PENDING_ACTION_NEEDS_CLARIFICATION",
+                "这条候选记录仍需补充信息，暂不能保存",
+                status_code=422,
+            )
+        if action.status != CONFIRMABLE_PENDING_ACTION_STATUS:
+            raise AppError("VALIDATION_ERROR", "待确认动作已处理，不能再次确认", status_code=422)
+
+    def _expire_action_if_needed(self, action: AgentPendingAction) -> None:
+        if action.status not in EDITABLE_STATUSES:
+            return
+        if pending_action_is_expired(action, utc_now()):
+            action.status = EXPIRED
+            self.db.flush()
+            raise AppError(
+                "PENDING_ACTION_EXPIRED",
+                "这条候选记录已过期，请重新描述后再保存",
+                status_code=422,
+            )
+
+    def _apply_status_from_draft(self, action: AgentPendingAction) -> None:
+        prior_warnings = [
+            item
+            for item in action.warnings_json or []
+            if item.get("reason")
+            not in {
+                "needs_clarification",
+                "missing_information",
+                "missing_required_field",
+                "ambiguous_user_correction",
+            }
+        ]
+        status = classify_pending_action_status(
+            action.action_type,
+            action.draft_payload_json or {},
+            warnings=prior_warnings,
+        )
+        action.status = status
+        action.warnings_json = normalize_status_warnings(status, prior_warnings)
 
     def _response(self, action: AgentPendingAction) -> dict:
         return {
@@ -285,6 +422,7 @@ class PendingActionService:
             "warnings": action.warnings_json or [],
             "created_at": action.created_at,
             "updated_at": action.updated_at,
+            "expires_at": action.expires_at,
         }
 
     def _committed_response(self, action: AgentPendingAction) -> dict:

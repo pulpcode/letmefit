@@ -840,7 +840,9 @@
         const response = await api(`/conversations/${$("conversationId").value}/pending-actions`);
         const actions = response.data.pending_actions || [];
         renderPendingActions(actions);
-        const pending = actions.find((action) => action.status === "pending_confirmation");
+        const pending = actions.find((action) =>
+          ["pending_confirmation", "needs_clarification"].includes(action.status),
+        );
         savePendingActionId(pending?.pending_action_id || "");
         return response;
       }
@@ -1086,8 +1088,8 @@
           let pendingResponse = null;
           for (const conversation of conversations) {
             const response = await api(`/conversations/${conversation.id}/pending-actions`);
-            const pending = response.data.pending_actions?.find(
-              (action) => action.status === "pending_confirmation",
+            const pending = response.data.pending_actions?.find((action) =>
+              ["pending_confirmation", "needs_clarification"].includes(action.status),
             );
             if (pending) {
               selected = conversation;

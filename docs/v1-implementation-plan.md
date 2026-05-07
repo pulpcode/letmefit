@@ -321,14 +321,15 @@ user_id
 conversation_id
 source_message_id
 extraction_id
-action_type: create_meal_record | create_body_metric_record | generate_daily_summary
-status: needs_clarification | pending_confirmation | confirmed | discarded | committed | expired
+action_type: create_meal_record | create_body_metric_record | create_workout_record
+status: needs_clarification | pending_confirmation | discarded | committed | expired
 draft_payload_json
 warnings_json
 confidence
 confirmed_at
 committed_record_type
 committed_record_id
+expires_at
 created_at
 updated_at
 ```

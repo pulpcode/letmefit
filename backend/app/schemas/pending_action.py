@@ -24,6 +24,7 @@ class PendingActionResponse(BaseModel):
     warnings: list[dict[str, Any]]
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    expires_at: datetime | None = None
 
 
 class PendingActionListResponse(BaseModel):

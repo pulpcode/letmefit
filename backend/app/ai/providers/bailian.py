@@ -105,7 +105,7 @@ SYSTEM_PROMPT = """
 - 当图像识别、媒体未处理、用户描述模糊、字段不完整或低置信度时，
   requires_review=true，并把低置信度字段放入 warnings。
 - propose_meal_record.arguments 必须尽量包含 recorded_at、source_type、meal_type、items。
-- recorded_at 应按 current_time 所在时区输出；没有明确钟点时不要臆造奇怪时间，后端会按餐型兜底修正。
+- 如果用户给出了明确时间（如"12:30"、"早上八点"），才在 recorded_at 中输出对应时刻；如果用户没有指定具体时间，省略 recorded_at 字段，后端会根据餐型和当前时间自动填充。
 - meal_type 只能是 breakfast/lunch/dinner/snack/unknown。
 - meal source_type 只能是 photo/voice/text/manual/mixed。
 - 常见餐食可以做一般健身记录用途的合理估算。对“两片面包”“一杯牛奶”等模糊份量，

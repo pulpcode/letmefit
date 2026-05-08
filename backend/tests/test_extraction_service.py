@@ -224,11 +224,10 @@ def test_extraction_service_normalizes_backfilled_meal_time(monkeypatch) -> None
                     name="propose_meal_record",
                     confidence=Decimal("0.70"),
                     arguments={
-                        "recorded_at": "2026-05-01T23:00:00+08:00",
                         "recorded_tz": "Asia/Shanghai",
                         "source_type": "voice",
                         "meal_type": "breakfast",
-                        "items": [{"name": "面包", "portion_text": "2片"}],
+                        "items": [{"name": "面包", "portion_grams": 60}],
                     },
                     grounding=ActionGrounding(
                         source="user_current_turn",
@@ -566,7 +565,7 @@ def test_extraction_service_tool_result_creates_confirmation_card_only() -> None
                     "recorded_at": "2026-05-06T12:30:00+08:00",
                     "source_type": "manual",
                     "meal_type": "lunch",
-                    "items": [{"name": "鸡胸肉", "portion_text": "120g"}],
+                    "items": [{"name": "鸡胸肉", "portion_text": "120g", "portion_grams": 120}],
                 },
                 grounding=ActionGrounding(
                     source="tool_result",
@@ -619,7 +618,7 @@ def test_extraction_service_assistant_plan_creates_confirmation_card_only() -> N
                         "recorded_at": "2026-05-06T19:00:00+08:00",
                         "source_type": "manual",
                         "meal_type": "dinner",
-                        "items": [{"name": "清蒸鱼", "portion_text": "120g"}],
+                        "items": [{"name": "清蒸鱼", "portion_text": "120g", "portion_grams": 120}],
                     },
                     grounding=ActionGrounding(
                         source="assistant_plan",

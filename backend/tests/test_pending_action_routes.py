@@ -304,7 +304,7 @@ def test_update_action_status_is_decided_by_backend_rules() -> None:
             "recorded_at": "2026-05-01T12:30:00+08:00",
             "source_type": "text",
             "meal_type": "lunch",
-            "items": [{"name": "炒面", "portion_text": "300g"}],
+            "items": [{"name": "炒面", "portion_text": "300g", "portion_grams": 300}],
         },
         warnings_json=[],
         expires_at=None,
@@ -334,7 +334,7 @@ def test_update_action_status_is_decided_by_backend_rules() -> None:
         "user_test",
         "pa_test",
         PendingActionUpdateRequest(
-            draft_payload={"items": [{"name": "炒面", "portion_text": "200g"}]}
+            draft_payload={"items": [{"name": "炒面", "portion_text": "200g", "portion_grams": 200}]}
         ),
         commit=False,
     )

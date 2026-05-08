@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -26,13 +25,6 @@ BODY_METRIC_VALUE_FIELDS = (
     "bmi",
     "muscle_mass_kg",
     "water_percentage",
-)
-UNCLEAR_RELATIVE_PORTION_PATTERN = re.compile(
-    r"(比.+?(少|多|小|大).*(一点|一些|点)|少一点|多一点|小一点|大一点)"
-)
-EXPLICIT_PORTION_PATTERN = re.compile(
-    r"\d+(?:\.\d+)?\s*(?:g|克|kg|公斤|ml|毫升|个|只|片|块|根|杯|勺|碗|盘|份|两|斤)",
-    flags=re.IGNORECASE,
 )
 
 
@@ -127,14 +119,7 @@ def _workout_status(draft_payload: dict[str, Any]) -> str:
 
 
 def _meal_item_has_clear_portion(item: dict[str, Any]) -> bool:
-    if item.get("portion_grams") is not None:
-        return True
-    portion_text = str(item.get("portion_text") or "").strip()
-    if not portion_text:
-        return False
-    if UNCLEAR_RELATIVE_PORTION_PATTERN.search(portion_text):
-        return False
-    return bool(EXPLICIT_PORTION_PATTERN.search(portion_text))
+    return item.get("portion_grams") is not None
 
 
 def _needs_clarification_warning(warnings: list[dict[str, Any]]) -> bool:

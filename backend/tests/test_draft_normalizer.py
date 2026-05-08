@@ -64,13 +64,11 @@ def test_normalize_meal_draft_uses_current_time_when_meal_matches_window() -> No
     normalized = normalize_pending_action_draft(
         "create_meal_record",
         {
-            "recorded_at": "2026-05-01T04:00:00+08:00",
             "recorded_tz": "Asia/Shanghai",
             "source_type": "voice",
             "meal_type": "lunch",
             "items": [{"name": "鸡胸肉"}],
         },
-        input_text="语音转写: 我中午吃了鸡胸肉",
         now=datetime(2026, 5, 1, 4, 20, 30, tzinfo=UTC),
     )
 
@@ -81,13 +79,11 @@ def test_normalize_meal_draft_uses_default_time_for_backfilled_meal() -> None:
     normalized = normalize_pending_action_draft(
         "create_meal_record",
         {
-            "recorded_at": "2026-05-01T23:00:00+08:00",
             "recorded_tz": "Asia/Shanghai",
             "source_type": "voice",
             "meal_type": "breakfast",
             "items": [{"name": "面包"}],
         },
-        input_text="语音转写: 我早上吃了两片面包",
         now=datetime(2026, 5, 1, 7, 20, 0, tzinfo=UTC),
     )
 
@@ -104,7 +100,6 @@ def test_normalize_meal_draft_preserves_explicit_clock_time() -> None:
             "meal_type": "lunch",
             "items": [{"name": "米饭"}],
         },
-        input_text="今天12:30吃了米饭",
         now=datetime(2026, 5, 1, 7, 20, 0, tzinfo=UTC),
     )
 

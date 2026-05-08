@@ -219,7 +219,7 @@ def test_agent_runtime_pauses_when_record_tool_requires_human_confirmation() -> 
                             "recorded_at": "2026-05-06T12:30:00+08:00",
                             "source_type": "text",
                             "meal_type": "lunch",
-                            "items": [{"name": "炒面", "portion_text": "300g"}],
+                            "items": [{"name": "炒面", "portion_text": "300g", "portion_grams": 300}],
                         },
                         grounding=ActionGrounding(
                             source="current_user_message",

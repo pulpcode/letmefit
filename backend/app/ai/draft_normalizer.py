@@ -1,4 +1,3 @@
-import re
 from datetime import UTC, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -7,17 +6,13 @@ from zoneinfo import ZoneInfo
 def normalize_pending_action_draft(
     action_type: str,
     draft_payload: dict[str, Any],
-    input_text: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     if action_type == "create_meal_record":
-        return _normalize_meal_draft(draft_payload, input_text=input_text, now=now)
+        return _normalize_meal_draft(draft_payload, now=now)
     return dict(draft_payload)
 
 
-EXPLICIT_CLOCK_PATTERN = re.compile(
-    r"(\d{1,2}\s*[:：]\s*\d{1,2}|\d{1,2}\s*[点时](?:\s*\d{1,2}\s*分?)?)"
-)
 DEFAULT_MEAL_TIMES = {
     "breakfast": time(8, 0),
     "lunch": time(12, 30),
@@ -27,7 +22,6 @@ DEFAULT_MEAL_TIMES = {
 
 def _normalize_meal_draft(
     draft_payload: dict[str, Any],
-    input_text: str | None,
     now: datetime | None,
 ) -> dict[str, Any]:
     normalized = dict(draft_payload)
@@ -35,8 +29,7 @@ def _normalize_meal_draft(
     items = normalized.get("items")
     if isinstance(items, list):
         normalized["items"] = [_normalize_meal_item(item) for item in items]
-    if input_text is not None:
-        _normalize_meal_recorded_at(normalized, input_text, now)
+    _normalize_meal_recorded_at(normalized, now)
     return normalized
 
 
@@ -67,10 +60,10 @@ def _normalize_meal_item(item: Any) -> Any:
 
 def _normalize_meal_recorded_at(
     draft_payload: dict[str, Any],
-    input_text: str,
     now: datetime | None,
 ) -> None:
-    if _has_explicit_clock(input_text):
+    # LLM sets recorded_at only when user named an explicit time; if absent, apply meal-window logic.
+    if draft_payload.get("recorded_at"):
         return
 
     timezone = ZoneInfo(str(draft_payload.get("recorded_tz") or "Asia/Shanghai"))
@@ -97,10 +90,6 @@ def _local_now(now: datetime | None, timezone: ZoneInfo) -> datetime:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(timezone)
-
-
-def _has_explicit_clock(input_text: str) -> bool:
-    return bool(EXPLICIT_CLOCK_PATTERN.search(input_text))
 
 
 def _current_window_matches(meal_type: Any, local_now: datetime) -> bool:

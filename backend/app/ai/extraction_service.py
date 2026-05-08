@@ -31,19 +31,6 @@ from app.services.pending_action_lifecycle import (
 
 logger = logging.getLogger(__name__)
 
-SAVE_CLAIM_TERMS = (
-    "已保存",
-    "已自动保存",
-    "已经保存",
-    "已为你将",
-    "已为你把",
-    "已将",
-    "已存为",
-    "保存到正式记录",
-    "已记录到",
-    "已经记录到",
-)
-
 
 class ExtractionService:
     def __init__(
@@ -127,7 +114,6 @@ class ExtractionService:
 
         pending_actions = []
         committed_records = []
-        input_text = self._joined_text(content)
         for tool_call in tool_calls:
             if tool_call.is_read_only_tool:
                 tool_results.append(
@@ -157,7 +143,6 @@ class ExtractionService:
             draft_payload = normalize_pending_action_draft(
                 action_spec.action_type,
                 action_spec.draft_payload,
-                input_text=input_text,
                 now=utc_now(),
             )
             confidence = self._action_confidence(action_spec, provider_result, draft_payload)
@@ -598,9 +583,6 @@ class ExtractionService:
         evidence_text: str,
         context: dict[str, Any],
     ) -> bool:
-        active_offer = context.get("ephemeral_state", {}).get("active_offer")
-        if isinstance(active_offer, dict) and evidence_text in self._json_text(active_offer):
-            return True
         for message in self._context_messages(context):
             if message.get("role") != "assistant":
                 continue
@@ -785,9 +767,9 @@ class ExtractionService:
             return committed_text
         if pending_actions:
             return self._pending_actions_text(pending_actions)
-        if self._has_rejected_tool_call(tool_results) and self._contains_save_claim(provider_text):
+        if self._has_rejected_record_tool_call(tool_results):
             return self._no_record_saved_text()
-        return self._sanitize_provider_text(provider_text)
+        return provider_text
 
     def _assistant_content(
         self,
@@ -857,16 +839,13 @@ class ExtractionService:
             "请逐项确认或修改后再保存。确认后我会根据确认结果继续处理这轮剩余问题。"
         )
 
-    def _has_rejected_tool_call(self, tool_results: list[dict[str, Any]]) -> bool:
-        return any(result.get("status") == "rejected" for result in tool_results)
+    def _has_rejected_record_tool_call(self, tool_results: list[dict[str, Any]]) -> bool:
+        from app.ai.types import RECORD_TOOL_NAMES
 
-    def _sanitize_provider_text(self, provider_text: str) -> str:
-        if self._contains_save_claim(provider_text):
-            return self._no_record_saved_text()
-        return provider_text
-
-    def _contains_save_claim(self, text: str) -> bool:
-        return any(term in text for term in SAVE_CLAIM_TERMS)
+        return any(
+            result.get("status") == "rejected" and result.get("tool_name") in RECORD_TOOL_NAMES
+            for result in tool_results
+        )
 
     def _no_record_saved_text(self) -> str:
         return (

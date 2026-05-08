@@ -12,11 +12,7 @@ export function patchPendingAction(pendingActionId: string, draftPayload: Record
   });
 }
 
-export function confirmPendingAction(
-  pendingActionId: string,
-  continueAgent = true,
-  includeAgentTrace = false
-) {
+export function confirmPendingAction(pendingActionId: string, includeAgentTrace = false) {
   return request<{
     pending_action_id: string;
     status: "committed";
@@ -26,15 +22,11 @@ export function confirmPendingAction(
   }>({
     path: `/agent/pending-actions/${pendingActionId}/confirm`,
     method: "POST",
-    data: { continue_agent: continueAgent, include_agent_trace: includeAgentTrace }
+    data: { include_agent_trace: includeAgentTrace }
   });
 }
 
-export function discardPendingAction(
-  pendingActionId: string,
-  continueAgent = true,
-  includeAgentTrace = false
-) {
+export function discardPendingAction(pendingActionId: string, includeAgentTrace = false) {
   return request<{
     pending_action_id: string;
     status: "discarded";
@@ -42,6 +34,6 @@ export function discardPendingAction(
   }>({
     path: `/agent/pending-actions/${pendingActionId}/discard`,
     method: "POST",
-    data: { continue_agent: continueAgent, include_agent_trace: includeAgentTrace }
+    data: { include_agent_trace: includeAgentTrace }
   });
 }

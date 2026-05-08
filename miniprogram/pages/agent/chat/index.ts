@@ -3,20 +3,24 @@ import { confirmPendingAction, discardPendingAction } from "../../../services/pe
 import { createClientLocalUpload, transcribeUploadFile, uploadLocalFile } from "../../../services/uploads";
 import { showApiError } from "../../../utils/request";
 import { getAgentAvatar } from "../../../utils/storage";
-import type { ConversationMessage, MessagePart, PendingAction } from "../../../types/api";
+import type { AgentContinuation, ConversationMessage, MessagePart, PendingAction } from "../../../types/api";
 
 const VOICE_MAX_SECONDS = 20;
 const VOICE_MIN_DURATION_MS = 800;
 const VOICE_MIN_BYTES = 4 * 1024;
-const VOICE_TICK_MS = 200; // 进度刷新间隔
+const VOICE_TICK_MS = 200;
 
-interface ChatMessage {
+type ChatItem =
+  | { kind: "message"; id: string; role: "user" | "assistant"; text: string; createdAt: string }
+  | { kind: "pending_action"; id: string; action: PendingAction; createdAt: string };
+
+interface ParsedMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  createdAt: string;
 }
 
-/** 解析一条服务端消息，提取文字内容 */
 function parseMessage(message: ConversationMessage): string {
   const parts = message.content || [];
   const texts: string[] = [];
@@ -25,9 +29,6 @@ function parseMessage(message: ConversationMessage): string {
     if (part.type === "text") {
       const text = part.source === "asr" ? stripAsrPrefix(part.text) : part.text;
       texts.push(text);
-    } else if (part.type === "audio") {
-      // 服务端 ASR 结果放在 content 中附加的 text 部分，不在 audio 块
-      // audio 块本身不含文字，跳过（文字由 normalize 追加的 text 部分携带）
     } else if (part.type === "image") {
       texts.push("📷 图片");
     } else if (part.type === "event") {
@@ -42,18 +43,30 @@ function stripAsrPrefix(text: string): string {
   return (text || "").replace(/^语音转写[:：]\s*/, "");
 }
 
+function buildChatItems(messages: ParsedMessage[], pendingActions: PendingAction[]): ChatItem[] {
+  const items: ChatItem[] = [];
+  for (const msg of messages) {
+    items.push({ kind: "message", id: msg.id, role: msg.role, text: msg.text, createdAt: msg.createdAt });
+  }
+  for (const pa of pendingActions) {
+    if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+      items.push({ kind: "pending_action", id: pa.pending_action_id, action: pa, createdAt: pa.created_at || "" });
+    }
+  }
+  items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return items;
+}
+
 Page({
   data: {
     conversationId: "",
     pageTitle: "对话",
-    messages: [] as Array<{ id: string; role: "user" | "assistant"; text: string }>,
-    pendingActions: [] as PendingAction[],
+    chatItems: [] as ChatItem[],
     inputValue: "",
     inputPlaceholder: "告诉我今天吃了什么...",
     avatar: "female",
     avatarSrc: "/assets/female-fit-agent.png",
     sending: false,
-    // 录音状态
     recording: false,
     voiceRemain: VOICE_MAX_SECONDS,
     voiceProgress: 100,
@@ -156,18 +169,16 @@ Page({
         listMessages(cid),
         listPendingActions(cid)
       ]);
-      const messages = (messageData.messages || [])
+      const messages: ParsedMessage[] = (messageData.messages || [])
         .map((msg) => ({
           id: msg.id,
           role: msg.role,
-          text: parseMessage(msg)
+          text: parseMessage(msg),
+          createdAt: msg.created_at
         }))
         .filter((msg) => msg.text);
       this.setData({
-        messages,
-        pendingActions: (pendingData.pending_actions || []).filter((item) =>
-          item.status === "pending_confirmation" || item.status === "needs_clarification"
-        )
+        chatItems: buildChatItems(messages, pendingData.pending_actions || [])
       });
       this.scrollToBottom();
     } catch (error) {
@@ -190,31 +201,44 @@ Page({
     const conversationId = await this.ensureConversation();
     if (!conversationId) return;
 
-    const localUserMessage = {
+    const now = new Date().toISOString();
+    const localUserItem: ChatItem = {
+      kind: "message",
       id: `local_user_${Date.now()}`,
-      role: "user" as const,
-      text: userPreview
+      role: "user",
+      text: userPreview,
+      createdAt: now
     };
     this.setData({
       sending: true,
-      messages: [...this.data.messages, localUserMessage]
+      chatItems: [...this.data.chatItems, localUserItem]
     });
     this.scrollToBottom();
 
     try {
       const data = await sendMessage(conversationId, content);
-      const nextMessages = [...this.data.messages];
+      const responseNow = new Date().toISOString();
+      let nextItems = [...this.data.chatItems];
       if (data.assistant_text) {
-        nextMessages.push({
+        nextItems.push({
+          kind: "message",
           id: data.assistant_message_id || `local_assistant_${Date.now()}`,
           role: "assistant",
-          text: data.assistant_text
+          text: data.assistant_text,
+          createdAt: responseNow
         });
       }
-      this.setData({
-        messages: nextMessages,
-        pendingActions: data.pending_actions || this.data.pendingActions
-      });
+      for (const pa of data.pending_actions || []) {
+        if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+          nextItems.push({
+            kind: "pending_action",
+            id: pa.pending_action_id,
+            action: pa,
+            createdAt: pa.created_at || responseNow
+          });
+        }
+      }
+      this.setData({ chatItems: nextItems });
       if (data.committed_records?.length) {
         wx.showToast({ title: "已保存", icon: "success" });
       }
@@ -286,7 +310,7 @@ Page({
     this._voiceTouchActive = false;
     if (!this.data.recording) return;
     const endY = event.changedTouches?.[0]?.clientY ?? this._voiceStartY;
-    const cancelled = (this._voiceStartY - endY) > 80; // 上滑 80px 取消
+    const cancelled = (this._voiceStartY - endY) > 80;
     this._stopRecording(cancelled);
   },
 
@@ -352,28 +376,26 @@ Page({
 
   async sendAudio(tempFilePath: string, duration: number) {
     const valid = await this._validateAudioFile(tempFilePath, duration);
-    if (!valid) {
-      return;
-    }
+    if (!valid) return;
     const conversationId = await this.ensureConversation();
     if (!conversationId) return;
 
-    const localUserMessage: ChatMessage = {
+    const now = new Date().toISOString();
+    const localUserItem: ChatItem = {
+      kind: "message",
       id: `local_user_voice_${Date.now()}`,
       role: "user",
-      text: "正在识别..."
+      text: "正在识别...",
+      createdAt: now
     };
     this.setData({
       sending: true,
-      messages: [...this.data.messages, localUserMessage]
+      chatItems: [...this.data.chatItems, localUserItem]
     });
     this.scrollToBottom();
 
     let transcriptShown = false;
     try {
-      // 必须用 uploadLocalFile 将音频文件上传到服务端，
-      // 后端 ASR（paraformer）需要一个公网可访问的 HTTP URL，
-      // client_local 模式只保存本地引用，后端无法访问音频文件。
       const mimeType = await this._audioMimeType(tempFilePath);
       const upload = await uploadLocalFile({
         filePath: tempFilePath,
@@ -383,36 +405,46 @@ Page({
       const transcription = await transcribeUploadFile(upload.file.id);
       const transcript = stripAsrPrefix(transcription.transcript || "").trim();
       if (!transcript) {
-        this._removeMessage(localUserMessage.id);
+        this._removeChatItem(localUserItem.id);
         wx.showToast({ title: "语音识别失败", icon: "none" });
         return;
       }
 
-      this._updateMessageText(localUserMessage.id, transcript);
+      this._updateChatItemText(localUserItem.id, transcript);
       transcriptShown = true;
       const data = await sendMessage(conversationId, [
         { type: "audio", file_id: upload.file.id, duration_seconds: Math.round(duration / 1000) },
         { type: "text", text: `语音转写: ${transcript}`, source: "asr" }
       ]);
-      const nextMessages = [...this.data.messages];
+      const responseNow = new Date().toISOString();
+      let nextItems = [...this.data.chatItems];
       if (data.assistant_text) {
-        nextMessages.push({
+        nextItems.push({
+          kind: "message",
           id: data.assistant_message_id || `local_assistant_${Date.now()}`,
           role: "assistant",
-          text: data.assistant_text
+          text: data.assistant_text,
+          createdAt: responseNow
         });
       }
-      this.setData({
-        messages: nextMessages,
-        pendingActions: data.pending_actions || this.data.pendingActions
-      });
+      for (const pa of data.pending_actions || []) {
+        if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+          nextItems.push({
+            kind: "pending_action",
+            id: pa.pending_action_id,
+            action: pa,
+            createdAt: pa.created_at || responseNow
+          });
+        }
+      }
+      this.setData({ chatItems: nextItems });
       if (data.committed_records?.length) {
         wx.showToast({ title: "已保存", icon: "success" });
       }
       this.scrollToBottom();
     } catch (error) {
       if (!transcriptShown) {
-        this._removeMessage(localUserMessage.id);
+        this._removeChatItem(localUserItem.id);
       }
       showApiError(error);
     } finally {
@@ -420,18 +452,18 @@ Page({
     }
   },
 
-  _updateMessageText(messageId: string, text: string) {
+  _updateChatItemText(itemId: string, text: string) {
     this.setData({
-      messages: this.data.messages.map((message) =>
-        message.id === messageId ? { ...message, text } : message
+      chatItems: this.data.chatItems.map((item) =>
+        item.id === itemId ? { ...item, text } : item
       )
     });
     this.scrollToBottom();
   },
 
-  _removeMessage(messageId: string) {
+  _removeChatItem(itemId: string) {
     this.setData({
-      messages: this.data.messages.filter((message) => message.id !== messageId)
+      chatItems: this.data.chatItems.filter((item) => item.id !== itemId)
     });
   },
 
@@ -440,7 +472,6 @@ Page({
       this._showInvalidAudioTip();
       return false;
     }
-
     try {
       const size = await this._audioFileSize(filePath);
       if (size < VOICE_MIN_BYTES) {
@@ -451,7 +482,6 @@ Page({
       wx.showToast({ title: "读取录音失败", icon: "none" });
       return false;
     }
-
     return true;
   },
 
@@ -509,23 +539,49 @@ Page({
           fail: () => resolve(false)
         });
       } catch (_) {
-        resolve(false);
+        resolve(false)
       }
     });
   },
 
   // ========== PendingAction ==========
 
+  _applyContinuation(chatItems: ChatItem[], continuation: AgentContinuation): ChatItem[] {
+    const now = new Date().toISOString();
+    const result: ChatItem[] = [
+      ...chatItems,
+      {
+        kind: "message",
+        id: continuation.assistant_message_id,
+        role: "assistant",
+        text: continuation.assistant_text,
+        createdAt: now
+      }
+    ];
+    for (const pa of continuation.pending_actions || []) {
+      if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+        result.push({ kind: "pending_action", id: pa.pending_action_id, action: pa, createdAt: pa.created_at || now });
+      }
+    }
+    return result;
+  },
+
   async onConfirmAction(event: any) {
     if (this.data.sending) return;
     const pendingActionId = event.detail.pendingActionId;
+    this.setData({ sending: true });
     try {
-      this.setData({ sending: true });
-      await confirmPendingAction(pendingActionId, true);
+      const res = await confirmPendingAction(pendingActionId);
       wx.showToast({ title: "已保存", icon: "success" });
-      await this.refreshConversation();
+      let chatItems = this.data.chatItems.filter((item) => item.id !== pendingActionId);
+      if (res.continuation) {
+        chatItems = this._applyContinuation(chatItems, res.continuation);
+      }
+      this.setData({ chatItems });
+      this.scrollToBottom();
     } catch (error) {
       showApiError(error);
+      await this.refreshConversation();
     } finally {
       this.setData({ sending: false });
     }
@@ -534,13 +590,19 @@ Page({
   async onDiscardAction(event: any) {
     if (this.data.sending) return;
     const pendingActionId = event.detail.pendingActionId;
+    this.setData({ sending: true });
     try {
-      this.setData({ sending: true });
-      await discardPendingAction(pendingActionId, true);
+      const res = await discardPendingAction(pendingActionId);
       wx.showToast({ title: "已放弃", icon: "success" });
-      await this.refreshConversation();
+      let chatItems = this.data.chatItems.filter((item) => item.id !== pendingActionId);
+      if (res.continuation) {
+        chatItems = this._applyContinuation(chatItems, res.continuation);
+      }
+      this.setData({ chatItems });
+      this.scrollToBottom();
     } catch (error) {
       showApiError(error);
+      await this.refreshConversation();
     } finally {
       this.setData({ sending: false });
     }

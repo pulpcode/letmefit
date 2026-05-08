@@ -20,23 +20,24 @@
   <!-- 消息列表 -->
   <scroll-view class="message-scroll" scroll-y scroll-into-view="{{scrollIntoView}}">
     <view class="message-list">
-      <view wx:if="{{!messages.length}}" class="message-row assistant welcome-message">
+      <view wx:if="{{!chatItems.length}}" class="message-row assistant welcome-message">
         <image class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
         <view class="bubble">
           <text>你好！我是你的健康健身助手。你可以告诉我今天吃了什么，或者记录体重等身体指标。</text>
         </view>
       </view>
 
-      <view wx:for="{{messages}}" wx:key="id" class="message-row {{item.role === 'user' ? 'user' : 'assistant'}}">
-        <image wx:if="{{item.role === 'assistant'}}" class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
-        <view class="bubble">
-          <text>{{item.text}}</text>
+      <block wx:for="{{chatItems}}" wx:key="id">
+        <view wx:if="{{item.kind === 'message'}}" class="message-row {{item.role === 'user' ? 'user' : 'assistant'}}">
+          <image wx:if="{{item.role === 'assistant'}}" class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
+          <view class="bubble">
+            <text>{{item.text}}</text>
+          </view>
         </view>
-      </view>
-
-      <view wx:for="{{pendingActions}}" wx:key="pending_action_id" class="pending-wrap">
-        <pending-action-card action="{{item}}" bind:confirm="onConfirmAction" bind:discard="onDiscardAction" bind:edit="onEditAction" />
-      </view>
+        <view wx:elif="{{item.kind === 'pending_action'}}" class="pending-wrap">
+          <pending-action-card action="{{item.action}}" bind:confirm="onConfirmAction" bind:discard="onDiscardAction" bind:edit="onEditAction" />
+        </view>
+      </block>
 
       <!-- 发送中动态指示 -->
       <view wx:if="{{sending}}" class="message-row assistant">

@@ -333,8 +333,6 @@ class AgentRuntime:
             return True
         if provider_result.intent != "fitness_record":
             return False
-        if provider_result.dialogue_state_patch:
-            return False
         return "?" in provider_result.assistant_text or "？" in provider_result.assistant_text
 
     def _with_tool_calls(

@@ -10,14 +10,12 @@ from app.core.config import Settings, get_settings
 from app.models import (
     AgentPendingAction,
     BodyMetricRecord,
-    Conversation,
     ConversationMessage,
     ConversationSummary,
     MealItem,
     MealRecord,
     UserProfile,
 )
-from app.services.dialogue_state import dialogue_state_context
 from app.services.pending_action_lifecycle import (
     ACTIVE_PENDING_ACTION_STATUSES,
     CONTEXT_PENDING_ACTION_LIMIT,
@@ -44,7 +42,6 @@ class ConversationContextBuilder:
         user_id: str,
         conversation_id: str,
         exclude_message_id: str | None = None,
-        dialogue_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         latest_summary = self.latest_summary(user_id, conversation_id)
         messages = self._conversation_messages(user_id, conversation_id)
@@ -58,12 +55,6 @@ class ConversationContextBuilder:
             latest_summary=latest_summary,
             exclude_message_id=exclude_message_id,
         )
-        state = (
-            dialogue_state
-            if dialogue_state is not None
-            else self._conversation_state(user_id, conversation_id)
-        )
-        state_context = dialogue_state_context(state)
 
         return {
             "memory_policy": {
@@ -76,8 +67,6 @@ class ConversationContextBuilder:
                 "summary_mode": "rolling",
                 "recent_message_limit": self.settings.conversation_context_recent_messages,
             },
-            "ephemeral_state": state_context["ephemeral_state"],
-            "durable_context": state_context["durable_context"],
             "profile": self._profile_context(user_id),
             "latest_conversation_summary": self._summary_context(latest_summary),
             "conversation_summary": self._summary_context(latest_summary),
@@ -104,15 +93,6 @@ class ConversationContextBuilder:
             .order_by(ConversationSummary.created_at.desc())
             .limit(1)
         )
-
-    def _conversation_state(self, user_id: str, conversation_id: str) -> dict[str, Any] | None:
-        conversation = self.db.scalar(
-            select(Conversation).where(
-                Conversation.id == conversation_id,
-                Conversation.user_id == user_id,
-            )
-        )
-        return conversation.dialogue_state_json if conversation else None
 
     def _conversation_messages(
         self,

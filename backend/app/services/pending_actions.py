@@ -23,10 +23,6 @@ from app.schemas.pending_action import (
 from app.schemas.records import BodyMetricCreateRequest, MealCreateRequest
 from app.services.body_metrics import BodyMetricService
 from app.services.conversation_context import ConversationContextBuilder
-from app.services.dialogue_state import (
-    normalize_dialogue_state,
-    update_dialogue_state_after_assistant,
-)
 from app.services.meals import MealService
 from app.services.pending_action_lifecycle import (
     CONFIRMABLE_PENDING_ACTION_STATUS,
@@ -471,11 +467,9 @@ class PendingActionService:
     ) -> dict[str, Any] | None:
         try:
             conversation = self._get_owned_conversation(action.user_id, action.conversation_id)
-            previous_dialogue_state = normalize_dialogue_state(conversation.dialogue_state_json)
             context = ConversationContextBuilder(self.db).build(
                 user_id=action.user_id,
                 conversation_id=action.conversation_id,
-                dialogue_state=previous_dialogue_state,
             )
             context["current_observation"] = observation
             context["input_origin"] = "pending_action_observation"
@@ -505,14 +499,6 @@ class PendingActionService:
                 requires_review=result["requires_review"],
                 created_at=assistant_created_at,
             )
-            conversation.dialogue_state_json = update_dialogue_state_after_assistant(
-                previous_dialogue_state,
-                assistant_text=result["assistant_text"],
-                assistant_message_id=assistant_message.id,
-                created_at=assistant_created_at,
-                dialogue_state_patch=result.get("dialogue_state_patch"),
-            )
-            conversation.dialogue_state_updated_at = utc_now()
             self.db.add(assistant_message)
             self.db.commit()
             response = {

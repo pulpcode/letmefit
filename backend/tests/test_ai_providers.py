@@ -87,30 +87,6 @@ def _body_metric_content() -> str:
     )
 
 
-def _offer_content() -> str:
-    return json.dumps(
-        {
-            "assistant_text": "需要我帮您规划一份适合的晚餐方案吗？",
-            "intent": "answer_fitness_question",
-            "requires_review": False,
-            "confidence": 0.86,
-            "warnings": [],
-            "tool_calls": [],
-            "dialogue_state_patch": {
-                "new_active_offer": {
-                    "kind": "assistant_offer",
-                    "surface_text": "需要我帮您规划一份适合的晚餐方案吗？",
-                    "referent": {
-                        "topic": "晚餐方案",
-                        "user_goal": "基于今日记录和减脂目标安排晚餐",
-                        "expected_followup": "用户同意时直接生成晚餐方案",
-                    },
-                }
-            },
-        },
-        ensure_ascii=False,
-    )
-
 
 def test_get_extraction_provider_defaults_to_mock() -> None:
     provider = get_extraction_provider(
@@ -167,20 +143,6 @@ def test_bailian_provider_parses_json_mode_response() -> None:
     assert call["response_format"] == {"type": "json_object"}
 
 
-def test_bailian_provider_parses_dialogue_state_patch() -> None:
-    client = FakeClient(_offer_content())
-    settings = Settings(
-        jwt_secret_key="test-secret-key-with-enough-length",
-        bailian_api_key="sk-test",
-    )
-    provider = BailianExtractionProvider(settings, client=client)
-
-    result = provider.extract(_input("我晚上还吃饭吗？"))
-
-    offer = result.dialogue_state_patch["new_active_offer"]
-    assert offer["kind"] == "assistant_offer"
-    assert offer["referent"]["topic"] == "晚餐方案"
-
 
 def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     client = FakeClient(_body_metric_content())
@@ -224,13 +186,6 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     )
     assert "只有 active_pending_actions" in "".join(prompt_json["context_contract"]["rules"])
     assert "优先读取 recent_records" in "".join(prompt_json["context_contract"]["rules"])
-    assert "不是正式事实来源" in "".join(prompt_json["context_contract"]["rules"])
-    assert "active_offer 会在本轮响应生成完成后清除" in "".join(
-        prompt_json["context_contract"]["rules"]
-    )
-    assert "expected_followup 是给下一轮模型使用的续聊提示" in "".join(
-        prompt_json["context_contract"]["rules"]
-    )
     assert "记录类 tool_calls 必须带 grounding" in "".join(
         prompt_json["context_contract"]["rules"]
     )
@@ -251,9 +206,6 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     assert "assistant_generated 等同 assistant_plan" in system_prompt
     assert "model_inference 不能写记录" in system_prompt
     assert "needs_clarification" in system_prompt
-    assert "dialogue_state_patch 不能包含 profile" in "".join(
-        prompt_json["context_contract"]["rules"]
-    )
 
 
 def test_bailian_provider_prompt_requires_recent_records_and_nutrition_estimates() -> None:

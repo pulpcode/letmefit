@@ -110,7 +110,6 @@ class ExtractionOutput(BaseModel):
     warnings: list[ExtractionWarningOutput] = Field(default_factory=list)
     tool_calls: list[ToolCallOutput] = Field(default_factory=list, max_length=10)
     pending_actions: list[PendingActionOutput] = Field(default_factory=list, max_length=10)
-    dialogue_state_patch: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_review_contract(self) -> Self:
@@ -133,6 +132,5 @@ class ExtractionOutput(BaseModel):
                 item.model_dump(mode="json", exclude_none=True)
                 for item in self.warnings
             ],
-            dialogue_state_patch=self.dialogue_state_patch,
             raw_output=raw_output,
         )

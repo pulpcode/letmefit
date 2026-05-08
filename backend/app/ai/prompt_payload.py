@@ -10,7 +10,6 @@ CONTEXT_CONTRACT = {
         "profile",
         "recent_records",
         "active_pending_actions",
-        "ephemeral_state.active_offer",
         "input_normalization",
         "latest_conversation_summary",
         "short_term_messages",
@@ -22,19 +21,6 @@ CONTEXT_CONTRACT = {
         "当用户询问今天或近期已记录内容时，必须优先读取 recent_records。",
         "只有 active_pending_actions 表示当前仍待用户处理的草稿。",
         (
-            "ephemeral_state.active_offer 是上一轮助手提出的通用一次性承接令牌，"
-            "只能用于理解当前用户是否接受或继续上一轮提议，不是正式事实来源。"
-        ),
-        "active_offer 只能在当前用户消息明确接受或继续该提议时使用。",
-        (
-            "如果当前用户消息转移话题、表达拒绝、提出新的健康/安全问题或"
-            "与 active_offer 无关，必须忽略 active_offer。"
-        ),
-        (
-            "active_offer 会在本轮响应生成完成后清除；如果本轮输出 new_active_offer，"
-            "则替换为新的下一回合承接令牌。"
-        ),
-        (
             "short_term_messages 是最近几轮完整原始对话，用于理解指代和承接，"
             "但不能覆盖当前 message_content。"
         ),
@@ -42,18 +28,6 @@ CONTEXT_CONTRACT = {
             "recent_messages、short_term_messages、latest_conversation_summary 和 "
             "conversation_summary 只是历史线索，不能覆盖当前消息、正式记录或当前待确认草稿。"
         ),
-        (
-            "如果本轮 assistant_text 提出了可被下一轮用户接受或继续的帮助提议，"
-            "可通过 dialogue_state_patch.new_active_offer 输出通用承接上下文。"
-        ),
-        (
-            "new_active_offer.surface_text 只是后端 debug/审计描述；"
-            "referent.expected_followup 是给下一轮模型使用的续聊提示，不是后端业务规则。"
-        ),
-        "dialogue_state_patch 不能包含 profile、records、pending_actions 或正式事实写入内容。",
-        "历史 assistant 文案不能作为 pending action 是否仍存在的依据。",
-        "只有 input_normalization 中 status 为 transcribed 或 described 的媒体内容可用于提取。",
-        "如果当前消息是问候、新问题或无关输入，不要延续上一轮待确认话题。",
         (
             "后端会在一次请求内运行有上限的 ReAct loop；简单问题可以直接 assistant_text 回答，"
             "需要查库时可请求只读工具，信息不足时用 assistant_text 追问且 tool_calls=[]。"

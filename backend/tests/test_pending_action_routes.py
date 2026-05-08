@@ -43,23 +43,13 @@ class FakePendingActionService:
         payload: PendingActionContinuationRequest | None = None,
     ) -> dict:
         payload = payload or PendingActionContinuationRequest()
-        self.calls.append(
-            (
-                "confirm",
-                user_id,
-                pending_action_id,
-                payload.continue_agent,
-                payload.include_agent_trace,
-            )
-        )
+        self.calls.append(("confirm", user_id, pending_action_id, payload.include_agent_trace))
         response = {
             "pending_action_id": pending_action_id,
             "status": "committed",
             "record_type": "meal",
             "record_id": "meal_test",
-        }
-        if payload.continue_agent:
-            response["continuation"] = {
+            "continuation": {
                 "assistant_message_id": "msg_continuation",
                 "assistant_text": "已确认午餐，我继续安排晚餐。",
                 "intent": "answer_fitness_question",
@@ -67,9 +57,10 @@ class FakePendingActionService:
                 "pending_actions": [],
                 "committed_records": [],
                 "tool_results": [],
-            }
-            if payload.include_agent_trace:
-                response["continuation"]["agent_trace"] = [{"event": "agent_started"}]
+            },
+        }
+        if payload.include_agent_trace:
+            response["continuation"]["agent_trace"] = [{"event": "agent_started"}]
         return response
 
     def discard_action(
@@ -79,21 +70,11 @@ class FakePendingActionService:
         payload: PendingActionContinuationRequest | None = None,
     ) -> dict:
         payload = payload or PendingActionContinuationRequest()
-        self.calls.append(
-            (
-                "discard",
-                user_id,
-                pending_action_id,
-                payload.continue_agent,
-                payload.include_agent_trace,
-            )
-        )
+        self.calls.append(("discard", user_id, pending_action_id, payload.include_agent_trace))
         response = {
             "pending_action_id": pending_action_id,
             "status": "discarded",
-        }
-        if payload.continue_agent:
-            response["continuation"] = {
+            "continuation": {
                 "assistant_message_id": "msg_continuation",
                 "assistant_text": "已放弃记录，我继续按不记录午餐处理。",
                 "intent": "answer_fitness_question",
@@ -101,9 +82,10 @@ class FakePendingActionService:
                 "pending_actions": [],
                 "committed_records": [],
                 "tool_results": [],
-            }
-            if payload.include_agent_trace:
-                response["continuation"]["agent_trace"] = [{"event": "agent_started"}]
+            },
+        }
+        if payload.include_agent_trace:
+            response["continuation"]["agent_trace"] = [{"event": "agent_started"}]
         return response
 
 
@@ -150,34 +132,30 @@ def test_confirm_and_discard_pending_action() -> None:
     discard = client.post("/v1/agent/pending-actions/pa_other/discard")
 
     assert confirm.status_code == 200
-    assert confirm.json()["data"] == {
-        "pending_action_id": "pa_test",
-        "status": "committed",
-        "record_type": "meal",
-        "record_id": "meal_test",
-    }
+    assert confirm.json()["data"]["pending_action_id"] == "pa_test"
+    assert confirm.json()["data"]["status"] == "committed"
+    assert confirm.json()["data"]["continuation"]["assistant_message_id"] == "msg_continuation"
     assert discard.status_code == 200
-    assert discard.json()["data"] == {
-        "pending_action_id": "pa_other",
-        "status": "discarded",
-    }
+    assert discard.json()["data"]["pending_action_id"] == "pa_other"
+    assert discard.json()["data"]["status"] == "discarded"
+    assert discard.json()["data"]["continuation"]["assistant_message_id"] == "msg_continuation"
     assert service.calls == [
-        ("confirm", "user_test", "pa_test", False, False),
-        ("discard", "user_test", "pa_other", False, False),
+        ("confirm", "user_test", "pa_test", False),
+        ("discard", "user_test", "pa_other", False),
     ]
 
 
-def test_confirm_and_discard_can_request_agent_continuation() -> None:
+def test_confirm_and_discard_include_agent_trace_when_requested() -> None:
     service = FakePendingActionService()
     client = TestClient(_authorized_app(service))
 
     confirm = client.post(
         "/v1/agent/pending-actions/pa_test/confirm",
-        json={"continue_agent": True, "include_agent_trace": True},
+        json={"include_agent_trace": True},
     )
     discard = client.post(
         "/v1/agent/pending-actions/pa_other/discard",
-        json={"continue_agent": True, "include_agent_trace": True},
+        json={"include_agent_trace": True},
     )
 
     assert confirm.status_code == 200
@@ -187,8 +165,8 @@ def test_confirm_and_discard_can_request_agent_continuation() -> None:
     assert discard.json()["data"]["continuation"]["assistant_message_id"] == "msg_continuation"
     assert discard.json()["data"]["continuation"]["agent_trace"][0]["event"] == "agent_started"
     assert service.calls == [
-        ("confirm", "user_test", "pa_test", True, True),
-        ("discard", "user_test", "pa_other", True, True),
+        ("confirm", "user_test", "pa_test", True),
+        ("discard", "user_test", "pa_other", True),
     ]
 
 

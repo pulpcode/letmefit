@@ -44,6 +44,11 @@ CONTEXT_CONTRACT = {
             "由模型基于语义判断。"
         ),
         (
+            "如果 active_pending_actions 非空且当前用户消息明显不是在处理这些确认卡，"
+            "必须在 assistant_text 结尾简短提醒用户尚有待确认草稿，"
+            "例如：另外，你还有一条待确认的午餐记录，请确认或放弃。"
+        ),
+        (
             "active_pending_actions 最多只注入最近 3 条；如果 overflow_count 大于 0，"
             "应询问用户是否查看更多待确认记录。"
         ),

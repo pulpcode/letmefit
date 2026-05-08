@@ -164,20 +164,19 @@ class PendingActionService:
         event_message_id = committed["event_message_id"]
         self.db.commit()
         response = self._committed_response(action)
-        if payload.continue_agent:
-            observation = self._confirmed_observation(
-                action=action,
-                record_type=committed["record_type"],
-                record=committed["record"],
-            )
-            continuation = self._run_continuation(
-                action=action,
-                observation=observation,
-                event_message_id=event_message_id,
-                include_agent_trace=payload.include_agent_trace,
-            )
-            if continuation is not None:
-                response["continuation"] = continuation
+        observation = self._confirmed_observation(
+            action=action,
+            record_type=committed["record_type"],
+            record=committed["record"],
+        )
+        continuation = self._run_continuation(
+            action=action,
+            observation=observation,
+            event_message_id=event_message_id,
+            include_agent_trace=payload.include_agent_trace,
+        )
+        if continuation is not None:
+            response["continuation"] = continuation
         return response
 
     def discard_action(
@@ -206,16 +205,15 @@ class PendingActionService:
             "pending_action_id": action.id,
             "status": action.status,
         }
-        if payload.continue_agent:
-            observation = self._discarded_observation(action)
-            continuation = self._run_continuation(
-                action=action,
-                observation=observation,
-                event_message_id=event_message_id,
-                include_agent_trace=payload.include_agent_trace,
-            )
-            if continuation is not None:
-                response["continuation"] = continuation
+        observation = self._discarded_observation(action)
+        continuation = self._run_continuation(
+            action=action,
+            observation=observation,
+            event_message_id=event_message_id,
+            include_agent_trace=payload.include_agent_trace,
+        )
+        if continuation is not None:
+            response["continuation"] = continuation
         return response
 
     def discard_actions_for_agent(

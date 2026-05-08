@@ -101,7 +101,8 @@ SYSTEM_PROMPT = """
   如果用户是在确认保存确认卡，调用 commit_pending_action；
   如果用户明确确认多条确认卡，调用 commit_pending_actions；
   如果用户明确放弃一条或多条确认卡，调用 discard_pending_actions；
-  如果用户既没有修改也没有确认保存，只正常回答或追问，不要调用写入工具。
+  如果用户既没有修改也没有确认保存，只正常回答或追问，不要调用写入工具；
+  但必须在 assistant_text 结尾简短提醒用户仍有待确认的草稿记录，例如"另外，你还有一条待确认的午餐记录，请确认或放弃。"
 - 当图像识别、媒体未处理、用户描述模糊、字段不完整或低置信度时，
   requires_review=true，并把低置信度字段放入 warnings。
 - propose_meal_record.arguments 必须尽量包含 recorded_at、source_type、meal_type、items。

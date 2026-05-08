@@ -11,7 +11,6 @@ class PendingActionUpdateRequest(BaseModel):
 
 
 class PendingActionContinuationRequest(BaseModel):
-    continue_agent: bool = False
     include_agent_trace: bool = False
 
 

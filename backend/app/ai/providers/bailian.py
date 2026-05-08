@@ -242,10 +242,33 @@ class BailianExtractionProvider(ExtractionProvider):
         }
 
     def _messages(self, payload: ExtractionInput) -> list[dict[str, str]]:
-        return [
+        messages: list[dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": self._user_prompt(payload)},
         ]
+        for turn in payload.prior_turns:
+            assistant_output = turn.get("assistant_output") or {}
+            tool_results = turn.get("tool_results") or []
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": json.dumps(assistant_output, ensure_ascii=False, default=str),
+                }
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "tool_results": tool_results,
+                            "instruction": "请根据工具执行结果继续处理，或给出最终 assistant_text 回答。",
+                        },
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                }
+            )
+        return messages
 
     def _user_prompt(self, payload: ExtractionInput) -> str:
         request = build_extraction_user_prompt_payload(payload)

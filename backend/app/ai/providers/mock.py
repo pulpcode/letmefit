@@ -22,7 +22,7 @@ class MockExtractionProvider(ExtractionProvider):
 
     def extract(self, payload: ExtractionInput) -> ExtractionProviderResult:
         text = self._joined_text(payload.content)
-        if payload.context.get("agent_loop", {}).get("tool_results"):
+        if payload.prior_turns:
             return ExtractionProviderResult(
                 assistant_text="我已根据工具结果完成处理。",
                 intent="answer_fitness_question",

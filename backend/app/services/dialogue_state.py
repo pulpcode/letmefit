@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from typing import Any
 
 from app.auth.security import new_id
+
+logger = logging.getLogger(__name__)
 
 STATE_VERSION = 1
 OPEN_STATUS = "open"
@@ -104,20 +107,31 @@ def active_offer_from_patch(
     if not isinstance(dialogue_state_patch, dict):
         return None
     if _contains_forbidden_key(dialogue_state_patch):
+        logger.debug("active_offer_from_patch: rejected — forbidden key in patch")
         return None
 
     offer = dialogue_state_patch.get("new_active_offer")
     if not isinstance(offer, dict):
         return None
     if offer.get("kind") != ACTIVE_OFFER_KIND:
+        logger.debug(
+            "active_offer_from_patch: rejected — kind=%r expected=%r",
+            offer.get("kind"),
+            ACTIVE_OFFER_KIND,
+        )
         return None
 
     surface_text = _clean_text(offer.get("surface_text"), MAX_SURFACE_TEXT_CHARS)
     if not surface_text:
+        logger.debug("active_offer_from_patch: rejected — surface_text missing or empty")
         return None
 
     referent = _referent(offer.get("referent"))
     if not referent:
+        logger.debug(
+            "active_offer_from_patch: rejected — referent invalid (needs topic + expected_followup); got=%r",
+            offer.get("referent"),
+        )
         return None
 
     return {

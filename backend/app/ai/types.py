@@ -40,7 +40,7 @@ PENDING_ACTION_TOOL_NAMES = {
     "commit_pending_actions",
     "discard_pending_actions",
 }
-HUMAN_CONFIRMATION_TOOL_NAMES = RECORD_TOOL_NAMES | {"update_pending_action"}
+HUMAN_CONFIRMATION_TOOL_NAMES = RECORD_TOOL_NAMES
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,7 @@ class ExtractionInput:
     message_id: str
     content: list[MessageContentItem]
     context: dict[str, Any] = field(default_factory=dict)
+    prior_turns: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

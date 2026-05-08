@@ -43,25 +43,22 @@ class AgentRuntime:
         ]
         pending_actions = []
         committed_records = []
-        tool_results: list[dict[str, Any]] = []
+        # Each entry: {"assistant_output": raw_output_dict, "tool_results": list[dict]}
+        prior_turns: list[dict[str, Any]] = []
         tool_rounds = 0
         total_tool_calls = 0
         provider_result: ExtractionProviderResult | None = None
+        initial_context = self._initial_loop_context(context)
 
         for model_turn in range(1, max(1, self.settings.agent_max_model_turns) + 1):
-            loop_context = self._loop_context(
-                context,
-                trace=trace,
-                tool_results=tool_results,
-                model_turn=model_turn,
-            )
             provider_result = self.provider.extract(
                 ExtractionInput(
                     user_id=user_id,
                     conversation_id=conversation_id,
                     message_id=message_id,
                     content=content,
-                    context=loop_context,
+                    context=initial_context,
+                    prior_turns=prior_turns,
                 )
             )
             trace.append(
@@ -86,12 +83,12 @@ class AgentRuntime:
                     provider_result=provider_result,
                     pending_actions=pending_actions,
                     committed_records=committed_records,
-                    tool_results=tool_results,
+                    prior_turns=prior_turns,
                     trace=trace,
                 )
 
+            # Check tool-level limits before executing (max_model_turns is handled by the for loop)
             limit_reason = self._loop_limit_reason(
-                model_turn=model_turn,
                 tool_rounds=tool_rounds,
                 total_tool_calls=total_tool_calls,
                 started_at=started_at,
@@ -109,7 +106,7 @@ class AgentRuntime:
                     provider_result=self._limit_result(provider_result),
                     pending_actions=pending_actions,
                     committed_records=committed_records,
-                    tool_results=tool_results,
+                    prior_turns=prior_turns,
                     trace=trace,
                 )
 
@@ -132,7 +129,7 @@ class AgentRuntime:
                     provider_result=self._limit_result(provider_result),
                     pending_actions=pending_actions,
                     committed_records=committed_records,
-                    tool_results=tool_results,
+                    prior_turns=prior_turns,
                     trace=trace,
                 )
 
@@ -159,6 +156,7 @@ class AgentRuntime:
                     }
                 )
 
+            prior_tool_results = self._all_tool_results(prior_turns)
             execution = self.extraction_service.execute_provider_result(
                 provider_result=provider_result,
                 user_id=user_id,
@@ -166,12 +164,20 @@ class AgentRuntime:
                 message_id=message_id,
                 content=content,
                 context=context,
-                prior_tool_results=tool_results,
+                prior_tool_results=prior_tool_results,
             )
             pending_actions.extend(execution["pending_actions"])
             committed_records.extend(execution["committed_records"])
             new_tool_results = execution["tool_results"]
-            tool_results.extend(new_tool_results)
+
+            # Accumulate this turn for multi-turn conversation history
+            prior_turns.append(
+                {
+                    "assistant_output": provider_result.raw_output,
+                    "tool_results": new_tool_results,
+                }
+            )
+
             for result in new_tool_results:
                 trace.append(
                     {
@@ -182,6 +188,7 @@ class AgentRuntime:
                         "reason": result.get("reason"),
                     }
                 )
+
             if self._requires_human_confirmation(new_tool_results):
                 trace.append(
                     {
@@ -199,16 +206,28 @@ class AgentRuntime:
                     provider_result=provider_result,
                     pending_actions=pending_actions,
                     committed_records=committed_records,
-                    tool_results=tool_results,
+                    prior_turns=prior_turns,
                     trace=trace,
                 )
 
+            # Tools executed; if this was the last model turn we cannot call LLM again
+            if model_turn >= max(1, self.settings.agent_max_model_turns):
+                trace.append({"event": "loop_limit_reached", "reason": "max_model_turns"})
+                return self._response(
+                    provider_result=self._limit_result(provider_result),
+                    pending_actions=pending_actions,
+                    committed_records=committed_records,
+                    prior_turns=prior_turns,
+                    trace=trace,
+                )
+
+        # Defensive fallback — unreachable for max_model_turns >= 1
         trace.append({"event": "loop_limit_reached", "reason": "max_model_turns"})
         return self._response(
             provider_result=self._limit_result(provider_result),
             pending_actions=pending_actions,
             committed_records=committed_records,
-            tool_results=tool_results,
+            prior_turns=prior_turns,
             trace=trace,
         )
 
@@ -218,9 +237,10 @@ class AgentRuntime:
         provider_result: ExtractionProviderResult,
         pending_actions: list,
         committed_records: list[dict[str, Any]],
-        tool_results: list[dict[str, Any]],
+        prior_turns: list[dict[str, Any]],
         trace: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        tool_results = self._all_tool_results(prior_turns)
         response = self.extraction_service._result_response(
             provider_result,
             pending_actions,
@@ -253,45 +273,32 @@ class AgentRuntime:
         committed_messages = {str(record.get("message") or "") for record in committed_records}
         return final_text not in committed_messages
 
-    def _loop_context(
-        self,
-        context: dict[str, Any],
-        *,
-        trace: list[dict[str, Any]],
-        tool_results: list[dict[str, Any]],
-        model_turn: int,
-    ) -> dict[str, Any]:
+    def _initial_loop_context(self, context: dict[str, Any]) -> dict[str, Any]:
         loop_context = deepcopy(context)
         loop_context["agent_loop"] = {
-            "model_turn": model_turn,
             "limits": {
                 "max_model_turns": self.settings.agent_max_model_turns,
                 "max_tool_rounds": self.settings.agent_max_tool_rounds,
                 "max_tool_calls_per_round": self.settings.agent_max_tool_calls_per_round,
                 "max_total_tool_calls": self.settings.agent_max_total_tool_calls,
             },
-            "tool_results": tool_results,
-            "trace_events": [
-                {
-                    "event": item.get("event"),
-                    "tool_name": item.get("tool_name"),
-                    "status": item.get("status"),
-                }
-                for item in trace
-            ],
         }
         return loop_context
+
+    def _all_tool_results(self, prior_turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for turn in prior_turns:
+            results.extend(turn.get("tool_results") or [])
+        return results
 
     def _loop_limit_reason(
         self,
         *,
-        model_turn: int,
         tool_rounds: int,
         total_tool_calls: int,
         started_at: float,
     ) -> str | None:
-        if model_turn >= max(1, self.settings.agent_max_model_turns):
-            return "max_model_turns"
+        # max_model_turns is enforced by the for-loop range; only tool-level limits here
         if tool_rounds >= max(0, self.settings.agent_max_tool_rounds):
             return "max_tool_rounds"
         if total_tool_calls >= max(1, self.settings.agent_max_total_tool_calls):

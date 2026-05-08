@@ -191,7 +191,7 @@ def test_agent_runtime_runs_query_tool_then_final_answer(monkeypatch) -> None:
 
     assert result["assistant_text"] == "今天已记录午餐：鸡胸肉。"
     assert len(provider.payloads) == 2
-    assert provider.payloads[1].context["agent_loop"]["tool_results"][0]["status"] == "succeeded"
+    assert provider.payloads[1].prior_turns[0]["tool_results"][0]["status"] == "succeeded"
     assert result["tool_results"][0]["tool_name"] == "query_meal_records"
     assert result["tool_results"][0]["data"]["meals"][0]["items"][0]["name"] == "鸡胸肉"
     assert [event["event"] for event in result["agent_trace"]] == [
@@ -299,9 +299,9 @@ def test_agent_runtime_stops_when_model_turn_limit_is_reached(monkeypatch) -> No
     monkeypatch.setattr("app.ai.extraction_service.MealService", FakeMealService)
     settings = _settings(
         agent_max_model_turns=3,
-        agent_max_tool_rounds=2,
+        agent_max_tool_rounds=10,  # tool-round limit must not be the binding constraint
         agent_max_tool_calls_per_round=3,
-        agent_max_total_tool_calls=6,
+        agent_max_total_tool_calls=20,
     )
     provider = SequenceProvider(
         [

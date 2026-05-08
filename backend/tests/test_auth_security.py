@@ -6,10 +6,12 @@ from app.auth.security import (
     create_refresh_token,
     decode_access_token,
     hash_secret,
+    new_id,
 )
 from app.auth.service import normalize_phone_number
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.core.ids import ID_LENGTH
 
 
 def test_normalize_mainland_phone_number() -> None:
@@ -50,3 +52,11 @@ def test_refresh_token_is_opaque() -> None:
 
     assert token.startswith("rt_")
     assert len(token) > 30
+
+
+def test_new_id_respects_database_id_length() -> None:
+    for prefix in ("user", "archive", "summary", "sms_evt", "conv_sum"):
+        value = new_id(prefix)
+
+        assert value.startswith(f"{prefix}_")
+        assert len(value) <= ID_LENGTH

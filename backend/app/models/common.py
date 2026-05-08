@@ -4,7 +4,8 @@ from sqlalchemy import String, text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
 
-ID_LENGTH = 40
+from app.core.ids import ID_LENGTH
+
 HASH_LENGTH = 128
 STATUS_LENGTH = 32
 

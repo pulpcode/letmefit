@@ -1,20 +1,16 @@
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
-from uuid import uuid4
 
 import jwt
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+from app.core.ids import new_id
 
 
 def utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
-
-
-def new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid4().hex}"
 
 
 def hash_secret(value: str, settings: Settings | None = None) -> str:

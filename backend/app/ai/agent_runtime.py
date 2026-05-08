@@ -169,6 +169,7 @@ class AgentRuntime:
             pending_actions.extend(execution["pending_actions"])
             committed_records.extend(execution["committed_records"])
             new_tool_results = execution["tool_results"]
+            self._prune_active_pending_actions(initial_context, new_tool_results)
 
             # Accumulate this turn for multi-turn conversation history
             prior_turns.append(
@@ -313,6 +314,35 @@ class AgentRuntime:
             and result.get("tool_name") in HUMAN_CONFIRMATION_TOOL_NAMES
             for result in tool_results
         )
+
+    def _prune_active_pending_actions(
+        self, context: dict[str, Any], tool_results: list[dict[str, Any]]
+    ) -> None:
+        active = context.get("active_pending_actions")
+        if not isinstance(active, list) or not active:
+            return
+        processed_ids: set[str] = set()
+        for result in tool_results:
+            tool_name = result.get("tool_name", "")
+            if tool_name == "commit_pending_action":
+                pid = result.get("pending_action_id")
+                if pid:
+                    processed_ids.add(pid)
+            elif tool_name == "commit_pending_actions":
+                for item in result.get("committed") or []:
+                    pid = item.get("pending_action_id")
+                    if pid:
+                        processed_ids.add(pid)
+            elif tool_name == "discard_pending_actions":
+                for item in result.get("discarded") or []:
+                    pid = item.get("pending_action_id")
+                    if pid:
+                        processed_ids.add(pid)
+        if processed_ids:
+            context["active_pending_actions"] = [
+                a for a in active
+                if a.get("pending_action_id") not in processed_ids
+            ]
 
     def _decision_label(self, provider_result: ExtractionProviderResult) -> str:
         if provider_result.tool_calls:

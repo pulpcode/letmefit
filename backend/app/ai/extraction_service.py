@@ -460,9 +460,11 @@ class ExtractionService:
                 "decision_reason": "llm_judged_user_confirmed_pending_action",
                 "message": committed["message"],
             }
+            tool_result = self._tool_result(tool_call, "committed", record=record)
+            tool_result["pending_action_id"] = pending_action_id
             return {
                 "committed_record": record,
-                "tool_result": self._tool_result(tool_call, "committed", record=record),
+                "tool_result": tool_result,
             }
 
         if tool_call.name == "commit_pending_actions":

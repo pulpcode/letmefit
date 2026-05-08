@@ -243,6 +243,7 @@ Page({
         wx.showToast({ title: "已保存", icon: "success" });
       }
       this.scrollToBottom();
+      this._syncPendingActions(conversationId);
     } catch (error) {
       showApiError(error);
     } finally {
@@ -442,6 +443,7 @@ Page({
         wx.showToast({ title: "已保存", icon: "success" });
       }
       this.scrollToBottom();
+      this._syncPendingActions(conversationId);
     } catch (error) {
       if (!transcriptShown) {
         this._removeChatItem(localUserItem.id);
@@ -545,6 +547,26 @@ Page({
   },
 
   // ========== PendingAction ==========
+
+  _syncPendingActions(conversationId: string) {
+    listPendingActions(conversationId)
+      .then(pendingData => {
+        const active = (pendingData.pending_actions || []).filter(
+          pa => pa.status === "pending_confirmation" || pa.status === "needs_clarification"
+        );
+        const messageItems = this.data.chatItems.filter(item => item.kind === "message");
+        const freshCards = active.map(pa => ({
+          kind: "pending_action" as const,
+          id: pa.pending_action_id,
+          action: pa,
+          createdAt: pa.created_at || new Date().toISOString(),
+        }));
+        const synced = [...messageItems, ...freshCards]
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        this.setData({ chatItems: synced });
+      })
+      .catch(() => {});
+  },
 
   _applyContinuation(chatItems: ChatItem[], continuation: AgentContinuation): ChatItem[] {
     const now = new Date().toISOString();

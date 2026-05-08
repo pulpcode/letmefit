@@ -12,8 +12,7 @@ CONTEXT_CONTRACT = {
         "active_pending_actions",
         "input_normalization",
         "latest_conversation_summary",
-        "short_term_messages",
-        "recent_messages",
+        "conversation_history",
     ],
     "rules": [
         "当前 message_content 是本轮用户输入和当前用户意图的最高优先级来源，优先于所有历史消息。",
@@ -21,11 +20,11 @@ CONTEXT_CONTRACT = {
         "当用户询问今天或近期已记录内容时，必须优先读取 recent_records。",
         "只有 active_pending_actions 表示当前仍待用户处理的草稿。",
         (
-            "short_term_messages 是最近几轮完整原始对话，用于理解指代和承接，"
-            "但不能覆盖当前 message_content。"
+            "conversation_history（当前消息之前的 chat turns）是最近几轮完整原始对话，"
+            "用于理解指代和承接，但不能覆盖当前 message_content。"
         ),
         (
-            "recent_messages、short_term_messages、latest_conversation_summary 和 "
+            "conversation_history、latest_conversation_summary 和 "
             "conversation_summary 只是历史线索，不能覆盖当前消息、正式记录或当前待确认草稿。"
         ),
         (
@@ -52,6 +51,10 @@ CONTEXT_CONTRACT = {
         (
             "active_pending_actions 最多只注入最近 3 条；如果 overflow_count 大于 0，"
             "应询问用户是否查看更多待确认记录。"
+        ),
+        (
+            "active_pending_actions 为空时，不要在 assistant_text 中提及"
+            "'没有待确认记录'；提醒规则只在 active_pending_actions 非空时生效。"
         ),
         (
             "pending action 状态由后端规则决定；模型不能直接指定 pending_confirmation、"
@@ -81,12 +84,16 @@ CONTEXT_CONTRACT = {
 
 def build_extraction_user_prompt_payload(payload: ExtractionInput) -> dict[str, Any]:
     content = [item.model_dump(mode="json", exclude_none=True) for item in payload.content]
+    context = {
+        k: v for k, v in payload.context.items()
+        if k not in ("short_term_messages", "recent_messages")
+    }
     return {
         "current_time": datetime.now(UTC).astimezone().isoformat(),
         "context_contract": CONTEXT_CONTRACT,
         "input_types": sorted({item["type"] for item in content}),
         "message_content": content,
-        "conversation_context": payload.context,
+        "conversation_context": context,
         "output_language": "zh-CN",
         "instruction": "请按 JSON schema 输出结构化提取结果。",
     }

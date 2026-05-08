@@ -96,6 +96,8 @@ SYSTEM_PROMPT = """
 - 后端会校验 evidence_text 是否真实存在于 grounding.source 对应来源中；校验失败的工具调用会被拒绝。
 - 模型不能声称已经保存记录，不能直接确认记录；保存、确认卡、拒绝状态由后端工具执行结果决定。
 - 当用户当前消息中的事实输入明确、字段完整且置信度高时，仍可调用记录工具；后端会创建确认卡。
+- 当 active_pending_actions 为空时，禁止在 assistant_text 中出现任何关于"没有待确认记录"
+  或"目前无草稿"之类的表述；提醒规则只在 active_pending_actions 非空时触发。
 - 当 active_pending_actions 非空时：
   如果用户是在修改确认卡，调用 update_pending_action；
   如果用户是在确认保存确认卡，调用 commit_pending_action；
@@ -111,9 +113,11 @@ SYSTEM_PROMPT = """
 - 如果用户给出了明确时间（如"12:30"、"早上八点"），才在 recorded_at 中输出对应时刻；如果用户没有指定具体时间，省略 recorded_at 字段，后端会根据餐型和当前时间自动填充。
 - meal_type 只能是 breakfast/lunch/dinner/snack/unknown。
 - meal source_type 只能是 photo/voice/text/manual/mixed。
-- 常见餐食可以做一般健身记录用途的合理估算。对“两片面包”“一杯牛奶”等模糊份量，
-  应估算 portion_text、portion_grams、calories、protein_g、carbs_g、fat_g，
-  并降低 confidence，在 warnings 中标记 estimated_portion 或 estimated_nutrition。
+- 当用户描述的食物是常见食物（米饭、面包、鸡蛋、鸡胸肉等）且已说明大致份量（如”一碗””两片”）
+  时，必须直接调用 propose 工具，不能以”份量不精确”为由继续追问；
+  估算的 portion_text、portion_grams、calories、protein_g、carbs_g、fat_g 写入 arguments，
+  confidence 设为 0.75 以下，warnings 中加 {“field”: “nutrition”, “reason”: “estimated_nutrition”}。
+  追问只应在完全不知道是什么食物，或用户描述过于模糊（如”吃了一点东西”）时才进行。
 - 不要声称估算是精确值；如果用户提供品牌、重量或包装营养表，则优先使用用户信息。
 - propose_body_metric_record.arguments 必须尽量包含 recorded_at、source_type。
 - body source_type 只能是 scale_photo/voice/text/manual。
@@ -121,8 +125,8 @@ SYSTEM_PROMPT = """
 - 如果用户询问已记录内容，例如“今天吃了什么”，必须优先使用
   conversation_context.recent_records 中的已确认正式记录回答；没有已确认记录时说明暂未看到。
   如果用户询问的日期或范围超出 recent_records，再调用只读查询工具。
-- short_term_messages 是最近完整原始对话，只用于理解指代和承接上下文；不能覆盖当前 message_content
-  以及 profile、recent_records、active_pending_actions。
+- 当前消息之前的 chat history 是最近几轮完整原始对话，用于理解指代、承接上下文和补全信息；
+  不能覆盖当前 message_content 以及 profile、recent_records、active_pending_actions。
 - 如果 conversation_context.input_normalization 标记图片或语音为 unprocessed，
   不能猜测媒体内容，只能根据已有文本、转写、图片描述或用户明确说明提取。
 - 如果超出健身管理边界，intent=out_of_scope，tool_calls=[]。
@@ -224,8 +228,15 @@ class BailianExtractionProvider(ExtractionProvider):
     def _messages(self, payload: ExtractionInput) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": self._user_prompt(payload)},
         ]
+        for msg in payload.context.get("short_term_messages") or []:
+            role = msg.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            text = self._history_message_text(msg)
+            if text:
+                messages.append({"role": role, "content": text})
+        messages.append({"role": "user", "content": self._user_prompt(payload)})
         for turn in payload.prior_turns:
             assistant_output = turn.get("assistant_output") or {}
             tool_results = turn.get("tool_results") or []
@@ -249,6 +260,19 @@ class BailianExtractionProvider(ExtractionProvider):
                 }
             )
         return messages
+
+    def _history_message_text(self, msg: dict[str, Any]) -> str:
+        content = msg.get("content")
+        if isinstance(content, list):
+            parts = [
+                str(item.get("text") or "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            text = " ".join(p for p in parts if p).strip()
+            if text:
+                return text
+        return str(msg.get("content_preview") or "").strip()
 
     def _user_prompt(self, payload: ExtractionInput) -> str:
         request = build_extraction_user_prompt_payload(payload)

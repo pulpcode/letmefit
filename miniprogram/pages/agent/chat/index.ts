@@ -12,7 +12,8 @@ const VOICE_TICK_MS = 200;
 
 type ChatItem =
   | { kind: "message"; id: string; role: "user" | "assistant"; text: string; createdAt: string }
-  | { kind: "pending_action"; id: string; action: PendingAction; createdAt: string };
+  | { kind: "pending_action"; id: string; action: PendingAction; createdAt: string }
+  | { kind: "pending_action_superseded"; id: string; pendingActionId: string; createdAt: string };
 
 interface ParsedMessage {
   id: string;
@@ -71,7 +72,10 @@ Page({
     voiceRemain: VOICE_MAX_SECONDS,
     voiceProgress: 100,
     voiceCancelling: false,
-    scrollIntoView: "bottom-anchor"
+    scrollIntoView: "bottom-anchor",
+    scrollStyle: "",
+    inputBarStyle: "",
+    voiceCardStyle: "",
   },
 
   recorder: null as any,
@@ -105,6 +109,7 @@ Page({
         inputPlaceholder: placeholder ? decodeURIComponent(placeholder) : "告诉我今天吃了什么..."
       });
     }
+    wx.onKeyboardHeightChange((res: any) => this._updateLayoutForKeyboard(res.height));
   },
 
   onShow() {
@@ -130,6 +135,7 @@ Page({
   onUnload() {
     wx.showTabBar({ animation: false });
     this._stopRecordingIfActive();
+    wx.offKeyboardHeightChange();
   },
 
   onBack() {
@@ -554,18 +560,81 @@ Page({
         const active = (pendingData.pending_actions || []).filter(
           pa => pa.status === "pending_confirmation" || pa.status === "needs_clarification"
         );
-        const messageItems = this.data.chatItems.filter(item => item.kind === "message");
-        const freshCards = active.map(pa => ({
-          kind: "pending_action" as const,
-          id: pa.pending_action_id,
-          action: pa,
-          createdAt: pa.created_at || new Date().toISOString(),
-        }));
-        const synced = [...messageItems, ...freshCards]
-          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-        this.setData({ chatItems: synced });
+        const freshById = new Map(active.map(pa => [pa.pending_action_id, pa]));
+        const now = new Date().toISOString();
+        const existingCardIds = new Set<string>();
+
+        // Pass 1: transform existing chatItems
+        const result: ChatItem[] = [];
+        for (const item of this.data.chatItems) {
+          if (item.kind === "pending_action") {
+            existingCardIds.add(item.id);
+            const fresh = freshById.get(item.id);
+            if (!fresh) {
+              continue; // committed or discarded — remove
+            }
+            if (fresh.updated_at !== item.action.updated_at) {
+              // Updated — replace with superseded placeholder at original position
+              result.push({
+                kind: "pending_action_superseded",
+                id: "superseded-" + item.id,
+                pendingActionId: item.id,
+                createdAt: item.createdAt,
+              });
+            } else {
+              result.push(item); // unchanged
+            }
+          } else {
+            result.push(item); // message or existing superseded
+          }
+        }
+
+        // Pass 2: add new or updated cards at the bottom
+        for (const pa of active) {
+          if (!existingCardIds.has(pa.pending_action_id)) {
+            // Brand new card
+            result.push({
+              kind: "pending_action",
+              id: pa.pending_action_id,
+              action: pa,
+              createdAt: pa.created_at || now,
+            });
+          } else {
+            const existing = this.data.chatItems.find(
+              i => i.kind === "pending_action" && i.id === pa.pending_action_id
+            ) as { action: PendingAction } | undefined;
+            if (existing && pa.updated_at !== existing.action.updated_at) {
+              // Updated card — float to bottom
+              result.push({
+                kind: "pending_action",
+                id: pa.pending_action_id,
+                action: pa,
+                createdAt: now,
+              });
+            }
+          }
+        }
+
+        result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        this.setData({ chatItems: result });
       })
       .catch(() => {});
+  },
+
+  _updateLayoutForKeyboard(kh: number) {
+    if (kh > 0) {
+      const info = wx.getWindowInfo();
+      const r = info.windowWidth / 750;
+      const inputBarPx = Math.ceil(134 * r);
+      const gapPx = Math.ceil(16 * r);
+      this.setData({
+        scrollStyle: `bottom: ${inputBarPx + kh}px`,
+        inputBarStyle: `bottom: ${kh}px`,
+        voiceCardStyle: `bottom: ${inputBarPx + kh + gapPx}px`,
+      });
+    } else {
+      this.setData({ scrollStyle: "", inputBarStyle: "", voiceCardStyle: "" });
+    }
   },
 
   _applyContinuation(chatItems: ChatItem[], continuation: AgentContinuation): ChatItem[] {
@@ -595,7 +664,10 @@ Page({
     try {
       const res = await confirmPendingAction(pendingActionId);
       wx.showToast({ title: "已保存", icon: "success" });
-      let chatItems = this.data.chatItems.filter((item) => item.id !== pendingActionId);
+      let chatItems = this.data.chatItems.filter(item =>
+        item.id !== pendingActionId &&
+        !(item.kind === "pending_action_superseded" && item.pendingActionId === pendingActionId)
+      );
       if (res.continuation) {
         chatItems = this._applyContinuation(chatItems, res.continuation);
       }
@@ -615,8 +687,11 @@ Page({
     this.setData({ sending: true });
     try {
       const res = await discardPendingAction(pendingActionId);
-      wx.showToast({ title: "已放弃", icon: "success" });
-      let chatItems = this.data.chatItems.filter((item) => item.id !== pendingActionId);
+      wx.showToast({ title: "已放弃", icon: "none" });
+      let chatItems = this.data.chatItems.filter(item =>
+        item.id !== pendingActionId &&
+        !(item.kind === "pending_action_superseded" && item.pendingActionId === pendingActionId)
+      );
       if (res.continuation) {
         chatItems = this._applyContinuation(chatItems, res.continuation);
       }

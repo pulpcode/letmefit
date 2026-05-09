@@ -18,7 +18,7 @@
   </view>
 
   <!-- 消息列表 -->
-  <scroll-view class="message-scroll" scroll-y scroll-into-view="{{scrollIntoView}}">
+  <scroll-view class="message-scroll" style="{{scrollStyle}}" scroll-y scroll-into-view="{{scrollIntoView}}">
     <view class="message-list">
       <view wx:if="{{!chatItems.length}}" class="message-row assistant welcome-message">
         <image class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
@@ -37,6 +37,9 @@
         <view wx:elif="{{item.kind === 'pending_action'}}" class="pending-wrap">
           <pending-action-card action="{{item.action}}" bind:confirm="onConfirmAction" bind:discard="onDiscardAction" bind:edit="onEditAction" />
         </view>
+        <view wx:elif="{{item.kind === 'pending_action_superseded'}}" class="superseded-wrap">
+          <text class="superseded-text">草稿已更新</text>
+        </view>
       </block>
 
       <!-- 发送中动态指示 -->
@@ -54,7 +57,7 @@
   </scroll-view>
 
   <!-- 输入栏：图片 | 输入框 | 麦克风 | 发送 -->
-  <view class="chat-input-bar">
+  <view class="chat-input-bar" style="{{inputBarStyle}}">
     <button class="tool-btn image-entry" bindtap="chooseImageSource" aria-label="图片">
       <t-icon name="logo-instagram" size="42rpx" color="#536171" />
     </button>
@@ -63,6 +66,7 @@
       placeholder="{{inputPlaceholder}}"
       value="{{inputValue}}"
       confirm-type="send"
+      adjust-position="{{false}}"
       bindinput="onInput"
       bindconfirm="onSend"
     />
@@ -81,7 +85,7 @@
   </view>
 
   <!-- 录音浮层：紧贴输入栏上方的小卡片 -->
-  <view wx:if="{{recording}}" class="voice-card {{voiceCancelling ? 'voice-card-cancel' : ''}}">
+  <view wx:if="{{recording}}" class="voice-card {{voiceCancelling ? 'voice-card-cancel' : ''}}" style="{{voiceCardStyle}}">
     <!-- 左侧：波纹 + 麦克风 -->
     <view class="voice-card-left">
       <view class="voice-rings-sm">

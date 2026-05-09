@@ -197,6 +197,17 @@
   padding-left: 88rpx;
 }
 
+.superseded-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 8rpx 0;
+}
+
+.superseded-text {
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
 .bottom-anchor {
   height: 2rpx;
 }

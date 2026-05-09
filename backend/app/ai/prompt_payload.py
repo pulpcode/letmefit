@@ -8,6 +8,8 @@ CONTEXT_CONTRACT = {
         "message_content",
         "current_observation",
         "profile",
+        "energy_target",
+        "today_summary",
         "recent_records",
         "active_pending_actions",
         "input_normalization",
@@ -64,6 +66,16 @@ CONTEXT_CONTRACT = {
         (
             "profile、recent_records、active_pending_actions 已在默认上下文中；不要为了读取它们"
             "重复调用工具。超出 recent_records 日期范围的记录查询才使用只读查询工具。"
+        ),
+        (
+            "energy_target 包含基于 profile 计算好的 BMR/TDEE/target_calories/macros_target；"
+            "回答用户关于'目标热量/蛋白质/碳水/脂肪'的问题时直接读取，不要重复推导公式。"
+            "energy_target 为 null 时按 energy_target_warnings 中的 missing 字段提示用户补档案。"
+        ),
+        (
+            "today_summary 包含用户今日已记录的 consumed/target/remaining/completion_percent；"
+            "回答'今天还能吃多少 / 今天吃了多少 / 今天完成度' 时直接读取它，"
+            "不要调用 query_meal_records 重复查询今日数据。"
         ),
         (
             "记录类 tool_calls 必须带 grounding；grounding.source 使用 user_message 或 "

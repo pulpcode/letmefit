@@ -175,10 +175,12 @@ def test_bailian_provider_includes_conversation_context_in_prompt() -> None:
     assert prompt_json["conversation_context"]["conversation_summary"]["created_at"] == (
         "2026-05-01 12:00:00"
     )
-    assert prompt_json["context_contract"]["authority_order"][:4] == [
+    assert prompt_json["context_contract"]["authority_order"][:6] == [
         "message_content",
         "current_observation",
         "profile",
+        "energy_target",
+        "today_summary",
         "recent_records",
     ]
     assert "当前用户意图的最高优先级来源" in "".join(

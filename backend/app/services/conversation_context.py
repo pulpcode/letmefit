@@ -16,12 +16,17 @@ from app.models import (
     MealRecord,
     UserProfile,
 )
+from app.services.energy_target import compute_energy_target, energy_target_to_dict
+from app.services.meals import MealService
 from app.services.pending_action_lifecycle import (
     ACTIVE_PENDING_ACTION_STATUSES,
     CONTEXT_PENDING_ACTION_LIMIT,
     EXPIRED,
     pending_action_context_summary,
 )
+from app.services.time import local_date_from_utc
+
+DEFAULT_USER_TIMEZONE = "Asia/Shanghai"
 
 ACTIVE_SUMMARY_JOB_STATUSES = {"pending", "running"}
 PENDING_SUMMARY_JOB_STATUS = "pending"
@@ -54,13 +59,20 @@ class ConversationContextBuilder:
         else:
             short_term = self._short_term_messages_by_token(messages_after, exclude_message_id)
 
+        profile = self._profile_context(user_id)
+        energy_target, energy_warnings = self._energy_target_context(profile)
+        today_summary = self._today_summary_context(user_id, energy_target)
+
         return {
             "memory_policy": {
                 "summary_mode": "async_rolling",
                 "keep_tokens": self.settings.conversation_summary_keep_tokens,
                 "summary_pending": active_job is not None,
             },
-            "profile": self._profile_context(user_id),
+            "profile": profile,
+            "energy_target": energy_target,
+            "energy_target_warnings": energy_warnings,
+            "today_summary": today_summary,
             "latest_conversation_summary": self._summary_context(latest_summary),
             "short_term_messages": [
                 self._full_message_context(message) for message in short_term
@@ -160,6 +172,27 @@ class ConversationContextBuilder:
             "goal_type": profile.goal_type,
             "profile_completed": profile.completed_at is not None,
         }
+
+    def _energy_target_context(
+        self,
+        profile: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+        target, warnings = compute_energy_target(profile)
+        return energy_target_to_dict(target), warnings
+
+    def _today_summary_context(
+        self,
+        user_id: str,
+        energy_target: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        today = local_date_from_utc(utc_now(), DEFAULT_USER_TIMEZONE)
+        target_macros: dict[str, int] | None = None
+        if energy_target:
+            target_macros = {
+                "calories": energy_target["target_calories"],
+                **energy_target["macros_target"],
+            }
+        return MealService(self.db).aggregate_daily(user_id, today, target=target_macros)
 
     def _summary_context(self, summary: ConversationSummary | None) -> dict[str, Any] | None:
         if not summary:

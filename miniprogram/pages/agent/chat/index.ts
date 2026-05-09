@@ -1,6 +1,6 @@
-import { createConversation, listMessages, listPendingActions, sendMessage } from "../../../services/conversations";
+import { createConversation, listMessages, listPendingActions, sendMessageStream } from "../../../services/conversations";
 import { confirmPendingAction, discardPendingAction } from "../../../services/pendingActions";
-import { createClientLocalUpload, transcribeUploadFile, uploadLocalFile } from "../../../services/uploads";
+import { transcribeUploadFile, uploadLocalFile } from "../../../services/uploads";
 import { showApiError } from "../../../utils/request";
 import { getAgentAvatar } from "../../../utils/storage";
 import type { AgentContinuation, ConversationMessage, MessagePart, PendingAction } from "../../../types/api";
@@ -204,58 +204,102 @@ Page({
     await this.sendContent([{ type: "text", text }], text);
   },
 
-  async sendContent(content: MessagePart[], userPreview: string) {
-    const conversationId = await this.ensureConversation();
-    if (!conversationId) return;
+  sendContent(content: MessagePart[], userPreview: string) {
+    (async () => {
+      const conversationId = await this.ensureConversation();
+      if (!conversationId) return;
 
-    const now = new Date().toISOString();
-    const localUserItem: ChatItem = {
-      kind: "message",
-      id: `local_user_${Date.now()}`,
-      role: "user",
-      text: userPreview,
-      createdAt: now
-    };
-    this.setData({
-      sending: true,
-      chatItems: [...this.data.chatItems, localUserItem]
-    });
-    this.scrollToBottom();
-
-    try {
-      const data = await sendMessage(conversationId, content);
-      const responseNow = new Date().toISOString();
-      let nextItems = [...this.data.chatItems];
-      if (data.assistant_text) {
-        nextItems.push({
-          kind: "message",
-          id: data.assistant_message_id || `local_assistant_${Date.now()}`,
-          role: "assistant",
-          text: data.assistant_text,
-          createdAt: responseNow
-        });
-      }
-      for (const pa of data.pending_actions || []) {
-        if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
-          nextItems.push({
-            kind: "pending_action",
-            id: pa.pending_action_id,
-            action: pa,
-            createdAt: pa.created_at || responseNow
-          });
-        }
-      }
-      this.setData({ chatItems: nextItems, summaryPending: data.summary_pending === true });
-      if (data.committed_records?.length) {
-        wx.showToast({ title: "已保存", icon: "success" });
-      }
+      const now = new Date().toISOString();
+      const localUserItem: ChatItem = {
+        kind: "message",
+        id: `local_user_${Date.now()}`,
+        role: "user",
+        text: userPreview,
+        createdAt: now
+      };
+      const streamingId = `streaming_${Date.now()}`;
+      const streamingItem: ChatItem = {
+        kind: "message",
+        id: streamingId,
+        role: "assistant",
+        text: "",
+        createdAt: now
+      };
+      this.setData({
+        sending: true,
+        chatItems: [...this.data.chatItems, localUserItem, streamingItem]
+      });
       this.scrollToBottom();
-      this._syncPendingActions(conversationId);
-    } catch (error) {
-      showApiError(error);
-    } finally {
-      this.setData({ sending: false });
-    }
+
+      let pendingText = "";
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const flushText = () => {
+        if (!pendingText) return;
+        const toAdd = pendingText;
+        pendingText = "";
+        this.setData({
+          chatItems: this.data.chatItems.map((item) =>
+            item.id === streamingId && item.kind === "message"
+              ? { ...item, text: item.text + toAdd }
+              : item
+          )
+        });
+        this.scrollToBottom();
+      };
+
+      sendMessageStream(
+        conversationId,
+        content,
+        (delta) => {
+          if (delta.type === "text" && delta.text) {
+            pendingText += delta.text;
+            if (!flushTimer) {
+              flushTimer = setTimeout(() => {
+                flushTimer = null;
+                flushText();
+              }, 50);
+            }
+          }
+        },
+        (data) => {
+          if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+          const responseNow = new Date().toISOString();
+          let nextItems = this.data.chatItems.filter((item) => item.id !== streamingId);
+          if (data.assistant_text) {
+            nextItems.push({
+              kind: "message",
+              id: data.assistant_message_id || `local_assistant_${Date.now()}`,
+              role: "assistant",
+              text: data.assistant_text,
+              createdAt: responseNow
+            });
+          }
+          for (const pa of data.pending_actions || []) {
+            if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+              nextItems.push({
+                kind: "pending_action",
+                id: pa.pending_action_id,
+                action: pa,
+                createdAt: pa.created_at || responseNow
+              });
+            }
+          }
+          this.setData({ chatItems: nextItems, sending: false, summaryPending: data.summary_pending === true });
+          if (data.committed_records?.length) {
+            wx.showToast({ title: "已保存", icon: "success" });
+          }
+          this.scrollToBottom();
+          this._syncPendingActions(conversationId);
+        },
+        (error) => {
+          if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+          this._removeChatItem(streamingId);
+          this.setData({ sending: false });
+          showApiError(error);
+        }
+      );
+    })();
   },
 
   async chooseImageSource() {
@@ -277,10 +321,9 @@ Page({
         sizeType: ["compressed"]
       });
       const file = res.tempFiles[0];
-      const upload = await createClientLocalUpload({
-        client_local_ref: file.tempFilePath,
+      const upload = await uploadLocalFile({
+        filePath: file.tempFilePath,
         mime_type: "image/jpeg",
-        size_bytes: file.size,
         source
       });
       await this.sendContent(
@@ -414,49 +457,100 @@ Page({
       const transcript = stripAsrPrefix(transcription.transcript || "").trim();
       if (!transcript) {
         this._removeChatItem(localUserItem.id);
+        this.setData({ sending: false });
         wx.showToast({ title: "语音识别失败", icon: "none" });
         return;
       }
 
       this._updateChatItemText(localUserItem.id, transcript);
       transcriptShown = true;
-      const data = await sendMessage(conversationId, [
-        { type: "audio", file_id: upload.file.id, duration_seconds: Math.round(duration / 1000) },
-        { type: "text", text: `语音转写: ${transcript}`, source: "asr" }
-      ]);
-      const responseNow = new Date().toISOString();
-      let nextItems = [...this.data.chatItems];
-      if (data.assistant_text) {
-        nextItems.push({
+
+      const streamingId = `streaming_voice_${Date.now()}`;
+      const streamingNow = new Date().toISOString();
+      this.setData({
+        chatItems: [...this.data.chatItems, {
           kind: "message",
-          id: data.assistant_message_id || `local_assistant_${Date.now()}`,
+          id: streamingId,
           role: "assistant",
-          text: data.assistant_text,
-          createdAt: responseNow
-        });
-      }
-      for (const pa of data.pending_actions || []) {
-        if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
-          nextItems.push({
-            kind: "pending_action",
-            id: pa.pending_action_id,
-            action: pa,
-            createdAt: pa.created_at || responseNow
-          });
-        }
-      }
-      this.setData({ chatItems: nextItems, summaryPending: data.summary_pending === true });
-      if (data.committed_records?.length) {
-        wx.showToast({ title: "已保存", icon: "success" });
-      }
+          text: "",
+          createdAt: streamingNow
+        } as ChatItem]
+      });
       this.scrollToBottom();
-      this._syncPendingActions(conversationId);
+
+      let pendingText = "";
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+      const flushText = () => {
+        if (!pendingText) return;
+        const toAdd = pendingText;
+        pendingText = "";
+        this.setData({
+          chatItems: this.data.chatItems.map((item) =>
+            item.id === streamingId && item.kind === "message"
+              ? { ...item, text: item.text + toAdd }
+              : item
+          )
+        });
+        this.scrollToBottom();
+      };
+
+      sendMessageStream(
+        conversationId,
+        [
+          { type: "audio", file_id: upload.file.id, duration_seconds: Math.round(duration / 1000) },
+          { type: "text", text: `语音转写: ${transcript}`, source: "asr" }
+        ],
+        (delta) => {
+          if (delta.type === "text" && delta.text) {
+            pendingText += delta.text;
+            if (!flushTimer) {
+              flushTimer = setTimeout(() => { flushTimer = null; flushText(); }, 50);
+            }
+          }
+        },
+        (data) => {
+          if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+          const responseNow = new Date().toISOString();
+          let nextItems = this.data.chatItems.filter((item) => item.id !== streamingId);
+          if (data.assistant_text) {
+            nextItems.push({
+              kind: "message",
+              id: data.assistant_message_id || `local_assistant_${Date.now()}`,
+              role: "assistant",
+              text: data.assistant_text,
+              createdAt: responseNow
+            });
+          }
+          for (const pa of data.pending_actions || []) {
+            if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+              nextItems.push({
+                kind: "pending_action",
+                id: pa.pending_action_id,
+                action: pa,
+                createdAt: pa.created_at || responseNow
+              });
+            }
+          }
+          this.setData({ chatItems: nextItems, sending: false, summaryPending: data.summary_pending === true });
+          if (data.committed_records?.length) {
+            wx.showToast({ title: "已保存", icon: "success" });
+          }
+          this.scrollToBottom();
+          this._syncPendingActions(conversationId);
+        },
+        (error) => {
+          if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+          this._removeChatItem(streamingId);
+          this.setData({ sending: false });
+          showApiError(error);
+        }
+      );
+      return; // streaming callbacks handle the rest
     } catch (error) {
       if (!transcriptShown) {
         this._removeChatItem(localUserItem.id);
       }
       showApiError(error);
-    } finally {
       this.setData({ sending: false });
     }
   },

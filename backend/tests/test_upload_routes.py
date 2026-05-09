@@ -395,6 +395,40 @@ async def test_upload_service_saves_webm_audio_file(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_upload_service_saves_jpeg_image_file(tmp_path) -> None:
+    db = FakeDb()
+    service = UploadService(
+        db=db,
+        settings=Settings(
+            jwt_secret_key="test-secret-key-with-enough-length",
+            media_upload_dir=str(tmp_path),
+            media_public_base_url="https://www.letmefit.cloud",
+        ),
+    )
+    upload_file = FastAPIUploadFile(
+        file=io.BytesIO(b"\xff\xd8\xff\xe0jpeg-bytes"),
+        filename="meal.jpg",
+        headers=Headers({"content-type": "image/jpeg"}),
+    )
+
+    result = await service.create_local_file_upload(
+        "user_test",
+        upload_file=upload_file,
+        source="camera",
+        retention_policy="transient",
+    )
+
+    saved_files = list(tmp_path.rglob("*.jpg"))
+    assert len(saved_files) == 1
+    assert saved_files[0].read_bytes() == b"\xff\xd8\xff\xe0jpeg-bytes"
+    assert db.added.storage_provider == "local_server"
+    assert db.added.status == "ready"
+    assert db.added.source == "camera"
+    assert result["file"]["mime_type"] == "image/jpeg"
+    assert result["file"]["object_key"].endswith(".jpg")
+
+
+@pytest.mark.asyncio
 async def test_upload_service_rejects_unsupported_local_file(tmp_path) -> None:
     service = UploadService(
         db=FakeDb(),

@@ -1,6 +1,9 @@
+import json
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 
 from app.auth.dependencies import get_current_user
 from app.core.responses import success_response
@@ -43,6 +46,38 @@ def send_message(
 ) -> dict:
     data = service.send_message(current_user.id, conversation_id, payload)
     return success_response(data, request)
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/{conversation_id}/messages/stream")
+def send_message_stream(
+    conversation_id: str,
+    payload: MessageCreateRequest,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[ConversationService, Depends(get_conversation_service)],
+):
+    def generate():
+        yield _sse("delta", {"type": "thinking"})
+        try:
+            result = service.send_message(current_user.id, conversation_id, payload)
+        except Exception as exc:
+            yield _sse("error", {"message": str(exc)})
+            return
+        text = result.get("assistant_text") or ""
+        for i in range(0, len(text), 3):
+            yield _sse("delta", {"type": "text", "text": text[i : i + 3]})
+            time.sleep(0.025)
+        yield _sse("done", result)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/{conversation_id}/messages")

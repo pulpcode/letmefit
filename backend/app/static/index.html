@@ -1174,28 +1174,104 @@
 
       $("refreshMessages").onclick = () => run(() => refreshMessages());
 
-      $("sendMessage").onclick = () =>
-        run(async () => {
-          const conversationId = $("conversationId").value;
-          const userText = $("messageText").value;
-          const response = await api(`/conversations/${conversationId}/messages`, {
-            method: "POST",
-            body: {
-              content: [{ type: "text", text: userText }],
-              include_debug_context: includeDebugContext(),
-              include_agent_trace: includeAgentTrace(),
+      $("sendMessage").onclick = async () => {
+        const conversationId = $("conversationId").value;
+        const userText = $("messageText").value;
+        if (!conversationId || !userText) return;
+
+        const btn = $("sendMessage");
+        btn.disabled = true;
+        const pill = $("statusPill");
+        const prevPillText = pill.textContent;
+        const prevPillClass = pill.className;
+        pill.textContent = "请求中…";
+        pill.className = "pill";
+
+        // Optimistic user message
+        const list = $("chatList");
+        const userEl = createElement("div", "message user");
+        userEl.appendChild(createElement("div", "message-role", "user"));
+        userEl.appendChild(createElement("div", "message-text", userText));
+        list.appendChild(userEl);
+
+        // Streaming assistant bubble
+        const assistantEl = createElement("div", "message assistant");
+        assistantEl.appendChild(createElement("div", "message-role", "assistant"));
+        const streamTextEl = createElement("div", "message-text", "");
+        assistantEl.appendChild(streamTextEl);
+        list.appendChild(assistantEl);
+        list.scrollTop = list.scrollHeight;
+
+        try {
+          const headers = { "Content-Type": "application/json" };
+          if (state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
+          const res = await fetch(
+            `${apiBase()}/conversations/${conversationId}/messages/stream`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                content: [{ type: "text", text: userText }],
+                include_debug_context: includeDebugContext(),
+                include_agent_trace: includeAgentTrace(),
+              }),
             },
-          });
-          cacheDebugTurn(response, userText);
-          $("summaryPill").style.display = response.data?.summary_pending ? "" : "none";
-          const action = response.data.pending_actions?.[0];
-          if (action) {
-            savePendingActionId(action.pending_action_id);
+          );
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw { status: res.status, body };
           }
-          await refreshMessages();
-          await refreshPendingActions();
-          return response;
-        });
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          let finalData = null;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const blocks = buf.split("\n\n");
+            buf = blocks.pop() ?? "";
+            for (const block of blocks) {
+              let event = "message";
+              let data = "";
+              for (const line of block.split("\n")) {
+                if (line.startsWith("event: ")) event = line.slice(7).trim();
+                else if (line.startsWith("data: ")) data = line.slice(6).trim();
+              }
+              if (!data) continue;
+              try {
+                const parsed = JSON.parse(data);
+                if (event === "delta" && parsed.type === "text" && parsed.text) {
+                  streamTextEl.textContent += parsed.text;
+                  list.scrollTop = list.scrollHeight;
+                } else if (event === "done") {
+                  finalData = parsed;
+                } else if (event === "error") {
+                  logError(parsed);
+                }
+              } catch (_) {}
+            }
+          }
+          if (finalData) {
+            const wrapped = { data: finalData };
+            log(wrapped);
+            cacheDebugTurn(wrapped, userText);
+            $("summaryPill").style.display = finalData.summary_pending ? "" : "none";
+            const action = finalData.pending_actions?.[0];
+            if (action) savePendingActionId(action.pending_action_id);
+            await refreshMessages();
+            await refreshPendingActions();
+          }
+        } catch (error) {
+          logError(error);
+          userEl.remove();
+          assistantEl.remove();
+        } finally {
+          btn.disabled = false;
+          pill.textContent = prevPillText;
+          pill.className = prevPillClass;
+        }
+      };
 
       function audioPrompt() {
         if ($("audioKind").value === "body_metric") {

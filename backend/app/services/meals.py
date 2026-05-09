@@ -36,6 +36,72 @@ class MealService:
         meals = list(self.db.scalars(query.order_by(MealRecord.recorded_at.desc())))
         return {"meals": [self._response(meal, self._items_by_meal_id(meal.id)) for meal in meals]}
 
+    def aggregate_daily(
+        self,
+        user_id: str,
+        local_date: date,
+        target: dict[str, int] | None = None,
+    ) -> dict:
+        meals = list(
+            self.db.scalars(
+                select(MealRecord).where(
+                    MealRecord.user_id == user_id,
+                    MealRecord.deleted_at.is_(None),
+                    MealRecord.local_date == local_date,
+                )
+            )
+        )
+        consumed_calories = self._sum_optional(meal.total_calories for meal in meals)
+        consumed_protein = self._sum_optional(meal.total_protein_g for meal in meals)
+        consumed_carbs = self._sum_optional(meal.total_carbs_g for meal in meals)
+        consumed_fat = self._sum_optional(meal.total_fat_g for meal in meals)
+
+        consumed = {
+            "calories": self._round(consumed_calories),
+            "protein_g": self._round(consumed_protein),
+            "carbs_g": self._round(consumed_carbs),
+            "fat_g": self._round(consumed_fat),
+        }
+
+        result: dict = {
+            "date": local_date.isoformat(),
+            "consumed": consumed,
+            "target": target,
+            "completion_percent": None,
+            "remaining": None,
+            "meal_count": len(meals),
+        }
+
+        if target:
+            result["completion_percent"] = {
+                "calories": self._percent(consumed["calories"], target.get("calories")),
+                "protein_g": self._percent(consumed["protein_g"], target.get("protein_g")),
+                "carbs_g": self._percent(consumed["carbs_g"], target.get("carbs_g")),
+                "fat_g": self._percent(consumed["fat_g"], target.get("fat_g")),
+            }
+            result["remaining"] = {
+                "calories": self._remaining(consumed["calories"], target.get("calories")),
+                "protein_g": self._remaining(consumed["protein_g"], target.get("protein_g")),
+                "carbs_g": self._remaining(consumed["carbs_g"], target.get("carbs_g")),
+                "fat_g": self._remaining(consumed["fat_g"], target.get("fat_g")),
+            }
+        return result
+
+    def _round(self, value: Decimal | None) -> float | None:
+        if value is None:
+            return None
+        return round(float(value), 1)
+
+    def _percent(self, consumed: float | None, target: int | None) -> int | None:
+        if consumed is None or not target:
+            return None
+        return int(round(consumed / target * 100))
+
+    def _remaining(self, consumed: float | None, target: int | None) -> float | None:
+        if target is None:
+            return None
+        return round(target - (consumed or 0), 1)
+
     def get_meal(self, user_id: str, meal_id: str) -> dict:
         meal = self._get_owned_meal(user_id, meal_id)
         return self._response(meal, self._items_by_meal_id(meal.id))

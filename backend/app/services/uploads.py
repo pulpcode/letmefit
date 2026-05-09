@@ -31,6 +31,14 @@ AUDIO_MIME_EXTENSIONS = {
     "audio/x-wav": "wav",
 }
 
+IMAGE_MIME_EXTENSIONS = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/heic": "heic",
+}
+
 
 class UploadService:
     def __init__(
@@ -76,22 +84,27 @@ class UploadService:
         mime_type: str | None = None,
     ) -> dict:
         normalized_mime_type = self._normalize_mime_type(mime_type or upload_file.content_type)
-        extension = AUDIO_MIME_EXTENSIONS.get(normalized_mime_type)
-        if not extension:
+        if normalized_mime_type in AUDIO_MIME_EXTENSIONS:
+            extension = AUDIO_MIME_EXTENSIONS[normalized_mime_type]
+            kind = "audio"
+        elif normalized_mime_type in IMAGE_MIME_EXTENSIONS:
+            extension = IMAGE_MIME_EXTENSIONS[normalized_mime_type]
+            kind = "image"
+        else:
             raise AppError(
                 "VALIDATION_ERROR",
-                "只支持上传音频文件",
+                "只支持上传音频或图片文件",
                 status_code=422,
                 details={"mime_type": normalized_mime_type or None},
             )
 
         content = await upload_file.read(self.settings.media_max_upload_bytes + 1)
         if not content:
-            raise AppError("VALIDATION_ERROR", "音频文件不能为空", status_code=422)
+            raise AppError("VALIDATION_ERROR", f"{kind} 文件不能为空", status_code=422)
         if len(content) > self.settings.media_max_upload_bytes:
             raise AppError(
                 "VALIDATION_ERROR",
-                "音频文件超过大小限制",
+                f"{kind} 文件超过大小限制",
                 status_code=422,
                 details={"max_bytes": self.settings.media_max_upload_bytes},
             )
@@ -104,7 +117,9 @@ class UploadService:
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_bytes(content)
         except OSError as exc:
-            raise AppError("INTERNAL_ERROR", "保存音频文件失败", status_code=500) from exc
+            raise AppError(
+                "INTERNAL_ERROR", f"保存 {kind} 文件失败", status_code=500
+            ) from exc
 
         file = UploadFileModel(
             id=file_id,

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from app.auth.security import utc_now
 from app.core.config import Settings
-from app.models import BodyMetricRecord, ConversationMessage, MealItem, MealRecord
+from app.models import BodyMetricRecord, ConversationMessage, MealItem, MealRecord, UserProfile
 from app.services.conversation_context import (
     ConversationContextBuilder,
     ConversationSummaryService,
@@ -254,6 +254,131 @@ def test_pending_action_context_includes_workout_summary() -> None:
     assert action["type"] == "create_workout_record"
     assert action["title"] == "跑步"
     assert action["editable_fields"]["duration_minutes"] == 30
+
+
+def test_energy_target_context_returns_none_when_profile_missing() -> None:
+    builder = ConversationContextBuilder(
+        db=object(),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+
+    target, warnings = builder._energy_target_context(None)
+
+    assert target is None
+    assert warnings[0]["reason"] == "profile_missing"
+
+
+def test_energy_target_context_returns_dict_for_complete_profile() -> None:
+    builder = ConversationContextBuilder(
+        db=object(),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+
+    target, warnings = builder._energy_target_context(
+        {
+            "age": 30,
+            "sex": "male",
+            "height_cm": 175,
+            "current_weight_kg": 75,
+            "target_weight_kg": 70,
+            "activity_level": "moderate",
+            "goal_type": "fat_loss",
+            "profile_completed": True,
+        }
+    )
+
+    assert warnings == []
+    assert target is not None
+    assert target["bmr"] > 0
+    assert target["target_calories"] > 0
+    assert "macros_target" in target
+
+
+def test_build_includes_energy_target_and_today_summary_keys() -> None:
+    profile = UserProfile(
+        id="up_test",
+        user_id="user_test",
+        age=30,
+        sex="male",
+        height_cm=Decimal("175"),
+        current_weight_kg=Decimal("75"),
+        target_weight_kg=Decimal("70"),
+        activity_level="moderate",
+        goal_type="fat_loss",
+        completed_at=datetime(2026, 5, 1, 10, 0, 0),
+    )
+
+    class FakeDb:
+        def scalar(self, query):
+            return profile
+
+        def scalars(self, query):
+            return []
+
+    builder = ConversationContextBuilder(
+        db=FakeDb(),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+    builder.latest_summary = lambda *_: None
+    builder._conversation_messages = lambda *_: []
+    builder._active_summary_job = lambda *_: None
+    builder._pending_action_context = lambda *_: {
+        "active_pending_actions": [],
+        "active_pending_actions_overflow_count": 0,
+        "active_pending_actions_overflow_hint": None,
+    }
+    builder._recent_records_context = lambda *_: {"meals": [], "body_metrics": []}
+
+    context = builder.build("user_test", "conv_test")
+
+    assert context["energy_target"] is not None
+    assert context["energy_target"]["target_calories"] > 0
+    assert context["energy_target_warnings"] == []
+    assert context["today_summary"]["meal_count"] == 0
+    assert context["today_summary"]["target"]["calories"] == context["energy_target"]["target_calories"]
+    assert context["today_summary"]["consumed"]["calories"] is None
+
+
+def test_build_today_summary_omits_target_when_profile_incomplete() -> None:
+    profile = UserProfile(
+        id="up_test",
+        user_id="user_test",
+        age=None,
+        sex=None,
+        height_cm=None,
+        current_weight_kg=None,
+        activity_level=None,
+        goal_type=None,
+        completed_at=None,
+    )
+
+    class FakeDb:
+        def scalar(self, query):
+            return profile
+
+        def scalars(self, query):
+            return []
+
+    builder = ConversationContextBuilder(
+        db=FakeDb(),
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+    builder.latest_summary = lambda *_: None
+    builder._conversation_messages = lambda *_: []
+    builder._active_summary_job = lambda *_: None
+    builder._pending_action_context = lambda *_: {
+        "active_pending_actions": [],
+        "active_pending_actions_overflow_count": 0,
+        "active_pending_actions_overflow_hint": None,
+    }
+    builder._recent_records_context = lambda *_: {"meals": [], "body_metrics": []}
+
+    context = builder.build("user_test", "conv_test")
+
+    assert context["energy_target"] is None
+    assert context["energy_target_warnings"][0]["reason"] == "profile_incomplete"
+    assert context["today_summary"]["target"] is None
+    assert context["today_summary"]["completion_percent"] is None
 
 
 def test_pending_action_context_expires_stale_actions() -> None:

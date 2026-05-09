@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     conversation_summary_running_timeout_seconds: int = 600
     asr_provider: str = "mock"
     vision_provider: str = "mock"
+    vision_model: str = "qwen-vl-max-latest"
+    vision_max_tokens: int = 1024
     dashscope_asr_endpoint: str = (
         "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription"
     )

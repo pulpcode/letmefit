@@ -26,7 +26,7 @@ export function createClientLocalUpload(input: UploadRecordInput) {
 type LocalFileUploadInput = {
   filePath: string;
   mime_type: string;
-  source: "microphone";
+  source: "microphone" | "camera" | "album" | "upload";
 };
 
 export function uploadLocalFile(input: LocalFileUploadInput) {

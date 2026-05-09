@@ -1,5 +1,25 @@
+import { getApiBaseUrl } from "../config/env";
+import { getTokens } from "../utils/storage";
 import { request } from "../utils/request";
 import type { Conversation, ConversationMessage, MessagePart, PendingAction, SendMessageResponse } from "../types/api";
+
+class SSEParser {
+  private buf = "";
+  feed(chunk: ArrayBuffer): { event: string; data: string }[] {
+    this.buf += new TextDecoder().decode(chunk);
+    const blocks = this.buf.split("\n\n");
+    this.buf = blocks.pop() ?? "";
+    return blocks.flatMap((block) => {
+      let event = "message";
+      let data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event: ")) event = line.slice(7).trim();
+        else if (line.startsWith("data: ")) data = line.slice(6).trim();
+      }
+      return data ? [{ event, data }] : [];
+    });
+  }
+}
 
 export function listConversations() {
   return request<{ conversations: Conversation[] }>({
@@ -30,6 +50,45 @@ export function sendMessage(conversationId: string, content: MessagePart[]) {
       content
     }
   });
+}
+
+export function sendMessageStream(
+  conversationId: string,
+  content: MessagePart[],
+  onDelta: (d: { type: string; text?: string }) => void,
+  onDone: (data: SendMessageResponse) => void,
+  onError: (err: Error) => void,
+): WechatMiniprogram.RequestTask {
+  const tokens = getTokens();
+  const header: Record<string, string> = { "content-type": "application/json" };
+  if (tokens?.access_token) {
+    header.Authorization = `Bearer ${tokens.access_token}`;
+  }
+  const parser = new SSEParser();
+  const task = wx.request({
+    url: `${getApiBaseUrl()}/conversations/${conversationId}/messages/stream`,
+    method: "POST",
+    data: { include_debug_context: false, content },
+    header,
+    enableChunked: true,
+    success: (res: any) => {
+      if (res.statusCode >= 400) {
+        onError(new Error("请求失败"));
+      }
+    },
+    fail: () => onError(new Error("网络不可用")),
+  });
+  task.onChunkReceived((res: any) => {
+    for (const { event, data } of parser.feed(res.data as ArrayBuffer)) {
+      try {
+        const parsed = JSON.parse(data);
+        if (event === "delta") onDelta(parsed);
+        else if (event === "done") onDone(parsed as SendMessageResponse);
+        else if (event === "error") onError(new Error(parsed.message || "未知错误"));
+      } catch (_) {}
+    }
+  });
+  return task;
 }
 
 export function listPendingActions(conversationId: string) {

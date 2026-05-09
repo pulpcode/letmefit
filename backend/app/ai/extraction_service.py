@@ -146,7 +146,7 @@ class ExtractionService:
                 now=utc_now(),
             )
             confidence = self._action_confidence(action_spec, provider_result, draft_payload)
-            warnings = self._record_action_warnings(tool_call, action_spec.warnings)
+            warnings = list(action_spec.warnings)
             status = classify_pending_action_status(
                 action_spec.action_type,
                 draft_payload,
@@ -257,65 +257,30 @@ class ExtractionService:
             return "grounding_missing"
 
         source = self._normalized_grounding_source(grounding.source)
-        if source == "model_inference":
-            return "source=model_inference"
-        evidence_text = grounding.evidence_text.strip()
-        if not evidence_text:
-            return "evidence_text_empty"
-
-        if source in {"current_user_message", "normalized_media_text"}:
-            if evidence_text not in input_text:
-                return "evidence_not_in_current_message"
-            return None
-        if source == "recent_user_message":
-            if not self._evidence_in_recent_user_messages(evidence_text, context):
-                return "evidence_not_in_recent_user_messages"
-            return None
-        if source == "active_pending_action":
-            if not self._grounding_references_active_pending_action(grounding, context):
-                return "active_pending_action_not_found"
-            return None
-        if source == "tool_result":
-            if not self._grounding_references_tool_result(grounding, prior_tool_results):
-                return "tool_result_not_found"
-            return None
         if source == "confirmed_record":
             return "source=confirmed_record"
-        if source == "assistant_plan":
-            if not self._evidence_in_assistant_plan(evidence_text, context):
-                return "assistant_plan_evidence_not_found"
-            return None
-        if evidence_text not in input_text:
-            return "evidence_not_in_user_message"
+        # user_message: evidence_text must be non-empty and present in the input
+        if source == "user_message":
+            evidence_text = grounding.evidence_text.strip()
+            if not evidence_text:
+                return "evidence_text_empty"
+            if evidence_text not in input_text:
+                return "evidence_not_in_user_message"
+        # model_inference: allowed — creates pending card, user confirms via UI
         return None
 
     def _normalized_grounding_source(self, source: GroundingSource) -> str:
-        if source == "user_current_turn":
-            return "current_user_message"
-        if source == "assistant_generated":
-            return "assistant_plan"
-        return str(source)
-
-    def _has_direct_record_grounding(self, tool_call: ExtractionToolCall) -> bool:
-        if not tool_call.grounding:
-            return False
-        return self._normalized_grounding_source(tool_call.grounding.source) in {
-            "current_user_message",
+        if source in {
+            "user_message", "user_current_turn", "current_user_message",
             "normalized_media_text",
-        }
-
-    def _record_action_warnings(
-        self,
-        tool_call: ExtractionToolCall,
-        warnings: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        normalized = list(warnings)
-        if self._has_direct_record_grounding(tool_call):
-            return normalized
-        if any(item.get("reason") == "grounding_requires_confirmation" for item in normalized):
-            return normalized
-        normalized.append({"field": "grounding", "reason": "grounding_requires_confirmation"})
-        return normalized
+        }:
+            return "user_message"
+        if source in {
+            "model_inference", "assistant_generated", "assistant_plan",
+            "active_pending_action", "tool_result", "recent_user_message",
+        }:
+            return "model_inference"
+        return str(source)
 
     def _pending_action_tool_drop_reason(
         self,
@@ -336,7 +301,7 @@ class ExtractionService:
         if grounding is None:
             return "grounding_missing"
         source = self._normalized_grounding_source(grounding.source)
-        if source != "current_user_message":
+        if source != "user_message":
             return "pending_action_tool_requires_current_user_message"
         evidence_text = grounding.evidence_text.strip()
         if not evidence_text:
@@ -346,7 +311,7 @@ class ExtractionService:
         return None
 
     def _pending_action_ids_from_tool_call(self, tool_call: ExtractionToolCall) -> list[str]:
-        if tool_call.name in {"commit_pending_actions", "discard_pending_actions"}:
+        if tool_call.name == "discard_pending_actions":
             value = tool_call.arguments.get("pending_action_ids")
             if not isinstance(value, list):
                 return []
@@ -435,73 +400,6 @@ class ExtractionService:
             tool_result["pending_action_id"] = pending_action_id
             return {"pending_action": updated_action, "tool_result": tool_result}
 
-        if tool_call.name == "commit_pending_action":
-            try:
-                committed = service.commit_action_for_agent(
-                    user_id,
-                    pending_action_id,
-                    draft_payload_patch=tool_call.arguments.get("draft_payload_patch"),
-                )
-            except AppError as exc:
-                return {
-                    "tool_result": self._tool_result(
-                        tool_call,
-                        "rejected",
-                        reason=exc.code,
-                    )
-                }
-            record = {
-                "type": committed["record_type"],
-                "record_id": committed["record_id"],
-                "record": committed["record"],
-                "source": "pending_action_commit",
-                "source_message_id": committed["source_message_id"],
-                "confidence": committed["confidence"],
-                "decision_reason": "llm_judged_user_confirmed_pending_action",
-                "message": committed["message"],
-            }
-            tool_result = self._tool_result(tool_call, "committed", record=record)
-            tool_result["pending_action_id"] = pending_action_id
-            return {
-                "committed_record": record,
-                "tool_result": tool_result,
-            }
-
-        if tool_call.name == "commit_pending_actions":
-            pending_action_ids = self._pending_action_ids_from_tool_call(tool_call)
-            result = service.commit_actions_for_agent(user_id, pending_action_ids)
-            committed_records = [
-                {
-                    "type": item["record_type"],
-                    "record_id": item["record_id"],
-                    "record": item["record"],
-                    "source": "pending_action_commit",
-                    "source_message_id": item["source_message_id"],
-                    "confidence": item["confidence"],
-                    "decision_reason": "llm_judged_user_confirmed_pending_actions",
-                    "message": item["message"],
-                }
-                for item in result["committed"]
-            ]
-            status = "committed" if not result["failed"] else "partial_committed"
-            return {
-                "committed_records": committed_records,
-                "tool_result": {
-                    "tool_name": tool_call.name,
-                    "action_type": tool_call.action_type,
-                    "status": status,
-                    "committed": [
-                        {
-                            "pending_action_id": item["pending_action_id"],
-                            "record_type": item["record_type"],
-                            "record_id": item["record_id"],
-                        }
-                        for item in result["committed"]
-                    ],
-                    "failed": result["failed"],
-                },
-            }
-
         if tool_call.name == "discard_pending_actions":
             pending_action_ids = self._pending_action_ids_from_tool_call(tool_call)
             result = service.discard_actions_for_agent(user_id, pending_action_ids)
@@ -535,80 +433,6 @@ class ExtractionService:
                 return None
         return None
 
-    def _evidence_in_recent_user_messages(
-        self,
-        evidence_text: str,
-        context: dict[str, Any],
-    ) -> bool:
-        for message in self._context_messages(context):
-            if message.get("role") != "user":
-                continue
-            if evidence_text in self._message_text(message):
-                return True
-        return False
-
-    def _grounding_references_active_pending_action(
-        self,
-        grounding,
-        context: dict[str, Any],
-    ) -> bool:
-        actions = context.get("active_pending_actions")
-        if not isinstance(actions, list):
-            return False
-        for action in actions:
-            if not isinstance(action, dict):
-                continue
-            if grounding.source_id and grounding.source_id == action.get("pending_action_id"):
-                return True
-            if grounding.evidence_text and grounding.evidence_text in self._json_text(action):
-                return True
-        return False
-
-    def _grounding_references_tool_result(
-        self,
-        grounding,
-        prior_tool_results: list[dict[str, Any]],
-    ) -> bool:
-        for result in prior_tool_results:
-            if grounding.source_id and grounding.source_id in {
-                str(result.get("tool_name") or ""),
-                str(result.get("record_id") or ""),
-                str(result.get("pending_action_id") or ""),
-            }:
-                return True
-            if grounding.evidence_text and grounding.evidence_text in self._json_text(result):
-                return True
-        return False
-
-    def _evidence_in_assistant_plan(
-        self,
-        evidence_text: str,
-        context: dict[str, Any],
-    ) -> bool:
-        for message in self._context_messages(context):
-            if message.get("role") != "assistant":
-                continue
-            if evidence_text in self._message_text(message):
-                return True
-        return False
-
-    def _context_messages(self, context: dict[str, Any]) -> list[dict[str, Any]]:
-        messages = []
-        for key in ("short_term_messages", "recent_messages"):
-            value = context.get(key)
-            if isinstance(value, list):
-                messages.extend(item for item in value if isinstance(item, dict))
-        return messages
-
-    def _message_text(self, message: dict[str, Any]) -> str:
-        content = message.get("content")
-        if isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, dict):
-                    parts.append(str(item.get("text") or item.get("event_type") or ""))
-            return " ".join(part for part in parts if part)
-        return str(message.get("content_preview") or "")
 
     def _json_text(self, value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, default=str)

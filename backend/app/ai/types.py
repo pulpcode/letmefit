@@ -6,24 +6,24 @@ from app.schemas.conversation import MessageContentItem
 
 Intent = Literal["fitness_record", "answer_fitness_question", "out_of_scope"]
 GroundingSource = Literal[
+    "user_message",
+    "model_inference",
+    # Legacy aliases — still accepted from LLM output, normalized internally
     "user_current_turn",
-    "assistant_generated",
     "current_user_message",
     "normalized_media_text",
     "recent_user_message",
     "active_pending_action",
+    "assistant_generated",
+    "assistant_plan",
     "tool_result",
     "confirmed_record",
-    "assistant_plan",
-    "model_inference",
 ]
 ToolName = Literal[
     "propose_meal_record",
     "propose_body_metric_record",
     "propose_workout_record",
     "update_pending_action",
-    "commit_pending_action",
-    "commit_pending_actions",
     "discard_pending_actions",
     "query_meal_records",
     "query_body_metric_records",
@@ -36,11 +36,8 @@ RECORD_TOOL_NAMES = {
 READ_ONLY_TOOL_NAMES = {"query_meal_records", "query_body_metric_records"}
 PENDING_ACTION_TOOL_NAMES = {
     "update_pending_action",
-    "commit_pending_action",
-    "commit_pending_actions",
     "discard_pending_actions",
 }
-HUMAN_CONFIRMATION_TOOL_NAMES = RECORD_TOOL_NAMES
 
 
 @dataclass(frozen=True)
@@ -97,10 +94,6 @@ class ExtractionToolCall:
             return "create_workout_record"
         if self.name == "update_pending_action":
             return "update_pending_action"
-        if self.name == "commit_pending_action":
-            return "commit_pending_action"
-        if self.name == "commit_pending_actions":
-            return "commit_pending_actions"
         if self.name == "discard_pending_actions":
             return "discard_pending_actions"
         if self.name == "query_meal_records":

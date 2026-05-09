@@ -36,17 +36,14 @@ CONTEXT_CONTRACT = {
             "修改或放弃后，会以 current_observation 形式进入新的请求上下文。"
         ),
         (
-            "如果 active_pending_actions 非空且当前用户消息是在修改确认卡，调用 "
-            "update_pending_action；如果当前用户消息是在确认保存确认卡，调用 "
-            "commit_pending_action；如果用户明确确认或放弃多条确认卡，调用 "
-            "commit_pending_actions 或 discard_pending_actions。是否属于修改、确认或放弃"
-            "由模型基于语义判断。"
+            "如果 active_pending_actions 非空且当前用户消息是在修改确认卡内容，调用 "
+            "update_pending_action；如果用户明确放弃，调用 discard_pending_actions；"
+            "确认操作由用户通过界面按钮完成，禁止调用 commit_pending_action。"
         ),
         (
             "如果 active_pending_actions 非空且当前用户消息明显不是在处理这些确认卡，"
             "必须在 assistant_text 结尾简短提醒用户尚有待确认草稿，"
-            "根据 active_pending_actions 中的实际类型和内容描述，不要照搬示例中的具体名称；"
-            "例如：另外，你还有一条待确认的草稿记录，请确认或放弃。"
+            "根据 active_pending_actions 中的实际类型和内容描述，不要照搬示例中的具体名称。"
         ),
         (
             "active_pending_actions 最多只注入最近 3 条；如果 overflow_count 大于 0，"
@@ -69,14 +66,9 @@ CONTEXT_CONTRACT = {
             "重复调用工具。超出 recent_records 日期范围的记录查询才使用只读查询工具。"
         ),
         (
-            "记录类 tool_calls 必须带 grounding；current_user_message 和 normalized_media_text "
-            "只会创建确认卡，recent_user_message、active_pending_action、tool_result、"
-            "assistant_plan 最多也只能创建确认卡，confirmed_record 只能用于回答和总结，"
-            "model_inference 不能写记录。"
-        ),
-        (
-            "助手自己规划、推荐、建议或估算出的内容不能作为用户已发生事实自动保存；"
-            "如需承接 assistant_plan，只能创建确认卡。"
+            "记录类 tool_calls 必须带 grounding；grounding.source 使用 user_message 或 "
+            "model_inference；所有 propose_* 只创建确认卡，由用户通过界面按钮确认；"
+            "confirmed_record 只用于回答和总结，不能创建新记录。"
         ),
     ],
 }

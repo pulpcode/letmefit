@@ -136,7 +136,7 @@ class ConversationService:
         conversation.status = "active"
         self.db.add(assistant_message)
         self.db.flush()
-        self.summary_service.enqueue_if_needed(user_id, conversation.id)
+        summary_job = self.summary_service.enqueue_if_needed(user_id, conversation.id)
         self.db.commit()
 
         response = {
@@ -148,6 +148,7 @@ class ConversationService:
             "pending_actions": extraction_result["pending_actions"],
             "committed_records": extraction_result["committed_records"],
             "tool_results": extraction_result.get("tool_results", []),
+            "summary_pending": summary_job is not None,
         }
         if payload.include_agent_trace:
             response["agent_trace"] = extraction_result.get("agent_trace", [])

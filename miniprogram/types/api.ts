@@ -172,6 +172,7 @@ export type SendMessageResponse = {
   tool_results?: Array<Record<string, unknown>>;
   agent_trace?: Array<Record<string, unknown>>;
   pending_actions?: PendingAction[];
+  summary_pending?: boolean;
 };
 
 export type AgentContinuation = {

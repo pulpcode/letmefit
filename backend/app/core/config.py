@@ -49,10 +49,11 @@ class Settings(BaseSettings):
     agent_max_tool_calls_per_round: int = 3
     agent_max_total_tool_calls: int = 6
     agent_loop_timeout_seconds: int = 25
-    conversation_context_short_term_full_turns: int = 4
-    conversation_context_recent_messages: int = 8
-    conversation_summary_trigger_messages: int = 16
+    conversation_summary_trigger_tokens: int = 3000
+    conversation_summary_keep_tokens: int = 1500
     conversation_summary_max_chars: int = 2000
+    summary_llm_enabled: bool = True
+    summary_llm_model: str = "qwen-turbo"
     conversation_summary_worker_limit: int = 10
     conversation_summary_worker_interval_seconds: float = 5.0
     conversation_summary_running_timeout_seconds: int = 600

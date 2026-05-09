@@ -423,3 +423,15 @@
   color: rgba(255, 255, 255, 0.55);
   letter-spacing: 1rpx;
 }
+
+.summary-pending-notice {
+  display: flex;
+  justify-content: center;
+  padding: 8rpx 0 4rpx;
+}
+
+.summary-pending-text {
+  font-size: 22rpx;
+  color: #a0aec0;
+  letter-spacing: 1rpx;
+}

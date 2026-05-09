@@ -8,6 +8,7 @@ from app.models import BodyMetricRecord, ConversationMessage, MealItem, MealReco
 from app.services.conversation_context import (
     ConversationContextBuilder,
     ConversationSummaryService,
+    _estimate_message_tokens,
     content_preview,
     content_types,
     estimate_tokens,
@@ -157,20 +158,6 @@ def test_compose_summary_marks_non_authoritative_context() -> None:
     assert "助手: 我整理成一条餐食草稿，请确认。" in summary
 
 
-def test_message_context_serializes_created_at() -> None:
-    builder = ConversationContextBuilder(
-        db=object(),
-        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
-    )
-
-    context = builder._message_context(_message("msg_1", "user", "午餐"))
-
-    assert context["created_at"] == "2026-05-01T12:00:00"
-    assert context["content_preview"] == "午餐"
-    assert context["content_types"] == ["text"]
-    assert "content" not in context
-
-
 def test_full_message_context_keeps_original_content() -> None:
     builder = ConversationContextBuilder(
         db=object(),
@@ -310,3 +297,101 @@ def test_pending_action_context_expires_stale_actions() -> None:
 def test_estimate_tokens_returns_small_positive_number() -> None:
     assert estimate_tokens("今天午餐吃了鸡胸肉") >= 1
     assert estimate_tokens("") == 0
+
+
+def test_estimate_message_tokens_counts_all_text_parts() -> None:
+    msg = ConversationMessage(
+        id="msg_t",
+        conversation_id="conv_test",
+        user_id="user_test",
+        role="user",
+        content_json=[
+            {"type": "text", "text": "早餐"},
+            {"type": "image", "file_id": "f1"},
+            {"type": "text", "text": "配了鸡蛋"},
+        ],
+        intent=None,
+        requires_review=False,
+        created_at=datetime(2026, 5, 1, 12, 0, 0),
+    )
+
+    tokens = _estimate_message_tokens(msg)
+
+    assert tokens >= 1
+
+
+def test_short_term_messages_by_token_keeps_newest_within_budget() -> None:
+    builder = ConversationContextBuilder(
+        db=object(),
+        settings=Settings(
+            jwt_secret_key="test-secret-key-with-enough-length",
+            conversation_summary_keep_tokens=2,
+        ),
+    )
+    messages = [
+        ConversationMessage(
+            id=f"msg_{i}",
+            conversation_id="conv_test",
+            user_id="user_test",
+            role="user",
+            content_json=[{"type": "text", "text": f"msg_{i}"}],
+            intent=None,
+            requires_review=False,
+            created_at=datetime(2026, 5, 1, 12, i, 0),
+        )
+        for i in range(5)
+    ]
+
+    result = builder._short_term_messages_by_token(messages, None)
+
+    assert [m.id for m in result] == ["msg_3", "msg_4"]
+
+
+def test_build_expands_all_messages_when_summary_job_is_pending() -> None:
+    from types import SimpleNamespace
+
+    gap_msg = ConversationMessage(
+        id="msg_gap",
+        conversation_id="conv_test",
+        user_id="user_test",
+        role="user",
+        content_json=[{"type": "text", "text": "gap message"}],
+        intent=None,
+        requires_review=False,
+        created_at=datetime(2026, 5, 1, 12, 0, 0),
+    )
+    recent_msg = ConversationMessage(
+        id="msg_recent",
+        conversation_id="conv_test",
+        user_id="user_test",
+        role="user",
+        content_json=[{"type": "text", "text": "recent message"}],
+        intent=None,
+        requires_review=False,
+        created_at=datetime(2026, 5, 1, 12, 1, 0),
+    )
+
+    class FakeDb:
+        def scalar(self, query):
+            return None
+
+        def scalars(self, query):
+            return []
+
+    builder = ConversationContextBuilder(
+        db=FakeDb(),
+        settings=Settings(
+            jwt_secret_key="test-secret-key-with-enough-length",
+            conversation_summary_keep_tokens=2,
+        ),
+    )
+    builder.latest_summary = lambda *_: None
+    builder._conversation_messages = lambda *_: [gap_msg, recent_msg]
+    builder._active_summary_job = lambda *_: SimpleNamespace(status="pending")
+
+    context = builder.build("user_test", "conv_test")
+
+    ids = [m["id"] for m in context["short_term_messages"]]
+    assert "msg_gap" in ids
+    assert "msg_recent" in ids
+    assert context["memory_policy"]["summary_pending"] is True

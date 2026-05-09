@@ -42,6 +42,11 @@
         </view>
       </block>
 
+      <!-- 历史对话压缩中提示 -->
+      <view wx:if="{{summaryPending && !sending}}" class="summary-pending-notice">
+        <text class="summary-pending-text">历史对话整理中…</text>
+      </view>
+
       <!-- 发送中动态指示 -->
       <view wx:if="{{sending}}" class="message-row assistant">
         <image class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />

@@ -24,8 +24,8 @@ CONTEXT_CONTRACT = {
             "用于理解指代和承接，但不能覆盖当前 message_content。"
         ),
         (
-            "conversation_history、latest_conversation_summary 和 "
-            "conversation_summary 只是历史线索，不能覆盖当前消息、正式记录或当前待确认草稿。"
+            "conversation_history 和 latest_conversation_summary 只是历史线索，"
+            "不能覆盖当前消息、正式记录或当前待确认草稿。"
         ),
         (
             "后端会在一次请求内运行有上限的 ReAct loop；简单问题可以直接 assistant_text 回答，"

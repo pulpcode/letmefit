@@ -198,7 +198,7 @@ def test_run_continuation_passes_pending_action_observation_context(monkeypatch)
 
         def build(self, **kwargs):
             return {
-                "recent_messages": [
+                "short_term_messages": [
                     {
                         "role": "user",
                         "content": [{"type": "text", "text": "中午吃了炒面，安排晚餐"}],
@@ -251,7 +251,7 @@ def test_run_continuation_passes_pending_action_observation_context(monkeypatch)
     assert captured["message_id"] == "msg_event"
     assert captured["context"]["input_origin"] == "pending_action_observation"
     assert captured["context"]["current_observation"]["pending_action_id"] == "pa_test"
-    assert captured["context"]["recent_messages"][0]["role"] == "user"
+    assert captured["context"]["short_term_messages"][0]["role"] == "user"
     assert captured["content"][0].source == "pending_action_observation"
     assert response["agent_trace"][0]["event"] == "agent_started"
     assert db.added[0].role == "assistant"

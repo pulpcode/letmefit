@@ -201,9 +201,30 @@
         word-break: break-all;
       }
 
+      .state pre.error {
+        color: #fca5a5;
+      }
+
+      .state.copyable {
+        position: relative;
+      }
+
+      .copy-btn {
+        position: absolute;
+        top: 0;
+        right: 0;
+        font-size: 11px;
+        padding: 2px 8px;
+      }
+
       .output-stack {
         display: grid;
         gap: 16px;
+        position: sticky;
+        top: 16px;
+        max-height: calc(100vh - 32px);
+        overflow-y: auto;
+        align-self: start;
       }
 
       .chat-panel,
@@ -433,6 +454,16 @@
                 <option value="maintenance">maintenance</option>
               </select>
             </label>
+            <label>
+              运动水平
+              <select id="activityLevel">
+                <option value="sedentary">sedentary</option>
+                <option value="light">light</option>
+                <option value="moderate" selected>moderate</option>
+                <option value="active">active</option>
+                <option value="very_active">very_active</option>
+              </select>
+            </label>
           </div>
           <div class="actions">
             <button id="getProfile">读取档案</button>
@@ -491,6 +522,7 @@
             <div class="panel-head">
               <span class="panel-title">聊天历史</span>
               <span class="pill" id="chatCount">0 条消息</span>
+              <span class="pill" id="summaryPill" style="display:none">整理中</span>
             </div>
             <div class="chat-list" id="chatList">
               <div class="empty-note">创建或加载会话后显示消息历史。</div>
@@ -562,16 +594,19 @@
             <code id="accessTokenView">未登录</code>
           </div>
         </div>
-        <div class="state">
+        <div class="state copyable">
           <span>响应</span>
+          <button class="copy-btn secondary" data-target="responseOutput">复制</button>
           <pre id="responseOutput"></pre>
         </div>
-        <div class="state">
+        <div class="state copyable">
           <span>LLM 请求 body</span>
+          <button class="copy-btn secondary" data-target="llmRequestOutput">复制</button>
           <pre id="llmRequestOutput"></pre>
         </div>
-        <div class="state">
+        <div class="state copyable">
           <span>Agent Trace</span>
+          <button class="copy-btn secondary" data-target="agentTraceOutput">复制</button>
           <pre id="agentTraceOutput"></pre>
         </div>
       </section>
@@ -878,9 +913,19 @@
       }
 
       function log(value) {
-        $("responseOutput").textContent = JSON.stringify(withoutDebugContext(value), null, 2);
+        const pre = $("responseOutput");
+        pre.classList.remove("error");
+        pre.textContent = JSON.stringify(withoutDebugContext(value), null, 2);
         $("llmRequestOutput").textContent = JSON.stringify(extractLlmRequestBody(value), null, 2);
         $("agentTraceOutput").textContent = JSON.stringify(extractAgentTrace(value), null, 2);
+      }
+
+      function logError(error) {
+        const pre = $("responseOutput");
+        pre.classList.add("error");
+        pre.textContent = JSON.stringify(error, null, 2);
+        $("llmRequestOutput").textContent = "";
+        $("agentTraceOutput").textContent = "";
       }
 
       function extractLlmRequestBody(value) {
@@ -989,13 +1034,24 @@
       }
 
       async function run(fn) {
+        const buttons = document.querySelectorAll("button");
+        buttons.forEach((b) => (b.disabled = true));
+        const pill = $("statusPill");
+        const prevText = pill.textContent;
+        const prevClass = pill.className;
+        pill.textContent = "请求中…";
+        pill.className = "pill";
         try {
           const result = await fn();
           log(result);
           return result;
         } catch (error) {
-          log(error);
+          logError(error);
           return null;
+        } finally {
+          buttons.forEach((b) => (b.disabled = false));
+          pill.textContent = prevText;
+          pill.className = prevClass;
         }
       }
 
@@ -1061,7 +1117,7 @@
               height_cm: Number($("heightCm").value),
               current_weight_kg: Number($("currentWeightKg").value),
               target_weight_kg: Number($("targetWeightKg").value),
-              activity_level: "moderate",
+              activity_level: $("activityLevel").value,
               goal_type: $("goalType").value,
             },
           }),
@@ -1131,6 +1187,7 @@
             },
           });
           cacheDebugTurn(response, userText);
+          $("summaryPill").style.display = response.data?.summary_pending ? "" : "none";
           const action = response.data.pending_actions?.[0];
           if (action) {
             savePendingActionId(action.pending_action_id);
@@ -1183,6 +1240,7 @@
             },
           });
           cacheDebugTurn(response, audioPrompt());
+          $("summaryPill").style.display = response.data?.summary_pending ? "" : "none";
           const action = response.data.pending_actions?.[0];
           if (action) {
             savePendingActionId(action.pending_action_id);
@@ -1349,6 +1407,23 @@
         });
       };
       $("pendingActionId").onchange = () => savePendingActionId($("pendingActionId").value);
+
+      $("messageText").addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          $("sendMessage").click();
+        }
+      });
+
+      document.querySelectorAll(".copy-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const text = $(btn.dataset.target).textContent;
+          navigator.clipboard.writeText(text).then(() => {
+            btn.textContent = "已复制";
+            setTimeout(() => (btn.textContent = "复制"), 1500);
+          });
+        });
+      });
 
       $("recordDate").value = today();
       updateState();

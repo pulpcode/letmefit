@@ -68,6 +68,7 @@ Page({
     avatar: "female",
     avatarSrc: "/assets/female-fit-agent.png",
     sending: false,
+    summaryPending: false,
     recording: false,
     voiceRemain: VOICE_MAX_SECONDS,
     voiceProgress: 100,
@@ -244,7 +245,7 @@ Page({
           });
         }
       }
-      this.setData({ chatItems: nextItems });
+      this.setData({ chatItems: nextItems, summaryPending: data.summary_pending === true });
       if (data.committed_records?.length) {
         wx.showToast({ title: "已保存", icon: "success" });
       }
@@ -444,7 +445,7 @@ Page({
           });
         }
       }
-      this.setData({ chatItems: nextItems });
+      this.setData({ chatItems: nextItems, summaryPending: data.summary_pending === true });
       if (data.committed_records?.length) {
         wx.showToast({ title: "已保存", icon: "success" });
       }

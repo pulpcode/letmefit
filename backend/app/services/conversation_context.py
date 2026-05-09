@@ -30,6 +30,7 @@ SUCCEEDED_SUMMARY_STATUS = "succeeded"
 FAILED_SUMMARY_STATUS = "failed"
 CONTEXT_RECORD_LIMIT = 5
 LOCAL_SUMMARY_MODEL_NAME = "local_compose_summary_v1"
+_SUMMARY_HEADER = "滚动摘要，用于后续模型上下文；正式事实以档案和记录表为准。"
 
 
 class ConversationContextBuilder:
@@ -45,34 +46,24 @@ class ConversationContextBuilder:
     ) -> dict[str, Any]:
         latest_summary = self.latest_summary(user_id, conversation_id)
         messages = self._conversation_messages(user_id, conversation_id)
-        recent_messages = self._recent_messages_after_summary(
-            messages=messages,
-            latest_summary=latest_summary,
-            exclude_message_id=exclude_message_id,
-        )
-        short_term_messages = self._short_term_messages_after_summary(
-            messages=messages,
-            latest_summary=latest_summary,
-            exclude_message_id=exclude_message_id,
-        )
+        active_job = self._active_summary_job(user_id, conversation_id)
+
+        messages_after = self._messages_after_summary(messages, latest_summary)
+        if active_job:
+            short_term = [m for m in messages_after if m.id != exclude_message_id]
+        else:
+            short_term = self._short_term_messages_by_token(messages_after, exclude_message_id)
 
         return {
             "memory_policy": {
                 "summary_mode": "async_rolling",
-                "short_term_full_turns": self.settings.conversation_context_short_term_full_turns,
-                "short_term_message_limit": self._short_term_message_limit(),
-                "recent_preview_message_limit": self.settings.conversation_context_recent_messages,
-            },
-            "policy": {
-                "summary_mode": "rolling",
-                "recent_message_limit": self.settings.conversation_context_recent_messages,
+                "keep_tokens": self.settings.conversation_summary_keep_tokens,
+                "summary_pending": active_job is not None,
             },
             "profile": self._profile_context(user_id),
             "latest_conversation_summary": self._summary_context(latest_summary),
-            "conversation_summary": self._summary_context(latest_summary),
-            "recent_messages": [self._message_context(message) for message in recent_messages],
             "short_term_messages": [
-                self._full_message_context(message) for message in short_term_messages
+                self._full_message_context(message) for message in short_term
             ],
             **self._pending_action_context(user_id, conversation_id),
             "recent_records": self._recent_records_context(user_id),
@@ -110,33 +101,38 @@ class ConversationContextBuilder:
             )
         )
 
-    def _recent_messages_after_summary(
+    def _active_summary_job(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> ConversationSummary | None:
+        return self.db.scalar(
+            select(ConversationSummary)
+            .where(
+                ConversationSummary.user_id == user_id,
+                ConversationSummary.conversation_id == conversation_id,
+                ConversationSummary.status.in_(ACTIVE_SUMMARY_JOB_STATUSES),
+            )
+            .order_by(ConversationSummary.created_at.desc())
+            .limit(1)
+        )
+
+    def _short_term_messages_by_token(
         self,
         messages: list[ConversationMessage],
-        latest_summary: ConversationSummary | None,
         exclude_message_id: str | None,
     ) -> list[ConversationMessage]:
-        messages_after_summary = self._messages_after_summary(messages, latest_summary)
-        filtered_messages = [
-            message for message in messages_after_summary if message.id != exclude_message_id
-        ]
-        recent_limit = max(1, self.settings.conversation_context_recent_messages)
-        return filtered_messages[-recent_limit:]
-
-    def _short_term_messages_after_summary(
-        self,
-        messages: list[ConversationMessage],
-        latest_summary: ConversationSummary | None,
-        exclude_message_id: str | None,
-    ) -> list[ConversationMessage]:
-        messages_after_summary = self._messages_after_summary(messages, latest_summary)
-        filtered_messages = [
-            message for message in messages_after_summary if message.id != exclude_message_id
-        ]
-        return filtered_messages[-self._short_term_message_limit() :]
-
-    def _short_term_message_limit(self) -> int:
-        return max(1, self.settings.conversation_context_short_term_full_turns) * 2
+        filtered = [m for m in messages if m.id != exclude_message_id]
+        keep_tokens = max(1, self.settings.conversation_summary_keep_tokens)
+        selected: list[ConversationMessage] = []
+        accumulated = 0
+        for msg in reversed(filtered):
+            msg_tokens = _estimate_message_tokens(msg)
+            if accumulated + msg_tokens > keep_tokens and selected:
+                break
+            selected.insert(0, msg)
+            accumulated += msg_tokens
+        return selected
 
     def _messages_after_summary(
         self,
@@ -180,17 +176,6 @@ class ConversationContextBuilder:
             "model_name": summary.model_name,
             "created_at": _iso_or_none(summary.created_at),
             "updated_at": _iso_or_none(summary.updated_at),
-        }
-
-    def _message_context(self, message: ConversationMessage) -> dict[str, Any]:
-        return {
-            "id": message.id,
-            "role": message.role,
-            "content_preview": content_preview(message.content_json),
-            "content_types": content_types(message.content_json),
-            "intent": message.intent,
-            "requires_review": message.requires_review,
-            "created_at": _iso_or_none(message.created_at),
         }
 
     def _full_message_context(self, message: ConversationMessage) -> dict[str, Any]:
@@ -385,12 +370,13 @@ class ConversationSummaryService:
             latest_summary,
         )
 
-        trigger_count = max(1, self.settings.conversation_summary_trigger_messages)
-        if len(messages_after_summary) <= trigger_count:
+        trigger_tokens = max(1, self.settings.conversation_summary_trigger_tokens)
+        total_tokens = sum(_estimate_message_tokens(m) for m in messages_after_summary)
+        if total_tokens <= trigger_tokens:
             return latest_summary
 
-        recent_limit = max(1, self.settings.conversation_context_recent_messages)
-        messages_to_summarize = messages_after_summary[:-recent_limit]
+        to_keep = self.context_builder._short_term_messages_by_token(messages_after_summary, None)
+        messages_to_summarize = messages_after_summary[: len(messages_after_summary) - len(to_keep)]
         if not messages_to_summarize:
             return latest_summary
 
@@ -403,9 +389,7 @@ class ConversationSummaryService:
             id=new_id("conv_sum"),
             conversation_id=conversation_id,
             user_id=user_id,
-            from_message_id=(
-                latest_summary.from_message_id if latest_summary else messages_to_summarize[0].id
-            ),
+            from_message_id=messages_to_summarize[0].id,
             to_message_id=messages_to_summarize[-1].id,
             summary_type="rolling",
             status=SUCCEEDED_SUMMARY_STATUS,
@@ -432,12 +416,13 @@ class ConversationSummaryService:
             latest_summary,
         )
 
-        trigger_count = max(1, self.settings.conversation_summary_trigger_messages)
-        if len(messages_after_summary) <= trigger_count:
+        trigger_tokens = max(1, self.settings.conversation_summary_trigger_tokens)
+        total_tokens = sum(_estimate_message_tokens(m) for m in messages_after_summary)
+        if total_tokens <= trigger_tokens:
             return None
 
-        recent_limit = self.context_builder._short_term_message_limit()
-        messages_to_summarize = messages_after_summary[:-recent_limit]
+        to_keep = self.context_builder._short_term_messages_by_token(messages_after_summary, None)
+        messages_to_summarize = messages_after_summary[: len(messages_after_summary) - len(to_keep)]
         if not messages_to_summarize:
             return None
 
@@ -450,9 +435,7 @@ class ConversationSummaryService:
             id=new_id("conv_sum"),
             conversation_id=conversation_id,
             user_id=user_id,
-            from_message_id=(
-                latest_summary.from_message_id if latest_summary else messages_to_summarize[0].id
-            ),
+            from_message_id=messages_to_summarize[0].id,
             to_message_id=messages_to_summarize[-1].id,
             summary_type="rolling",
             status=PENDING_SUMMARY_JOB_STATUS,
@@ -578,21 +561,35 @@ class ConversationSummaryService:
             self._fail_job(job, "summary_job_messages_not_found")
             return False
 
-        summary_text = self.compose_summary(
-            previous_summary_text=previous_summary.summary_text if previous_summary else None,
+        prev_text = previous_summary.summary_text if previous_summary else None
+        max_chars = self.settings.conversation_summary_max_chars
+
+        llm_content = self._llm_summarize(
+            previous_summary_text=prev_text,
             messages=messages,
-            max_chars=self.settings.conversation_summary_max_chars,
+            max_chars=max_chars,
         )
+        if llm_content is not None:
+            summary_text = truncate_text(f"{_SUMMARY_HEADER}\n{llm_content}", max_chars)
+            used_model = self.settings.summary_llm_model
+        else:
+            summary_text = self.compose_summary(
+                previous_summary_text=prev_text,
+                messages=messages,
+                max_chars=max_chars,
+            )
+            used_model = LOCAL_SUMMARY_MODEL_NAME
+
         job.status = SUCCEEDED_SUMMARY_STATUS
         job.summary_text = summary_text
         job.summary_json = {
             "message_count": len(messages),
             "from_message_id": job.from_message_id,
             "to_message_id": job.to_message_id,
-            "method": LOCAL_SUMMARY_MODEL_NAME,
+            "method": used_model,
         }
         job.token_estimate = estimate_tokens(summary_text)
-        job.model_name = LOCAL_SUMMARY_MODEL_NAME
+        job.model_name = used_model
         job.updated_at = utc_now()
         self.db.flush()
         return True
@@ -635,20 +632,99 @@ class ConversationSummaryService:
             return []
         return messages[from_index : to_index + 1]
 
+    def _llm_summarize(
+        self,
+        previous_summary_text: str | None,
+        messages: list[ConversationMessage],
+        max_chars: int,
+    ) -> str | None:
+        if not self.settings.summary_llm_enabled:
+            return None
+        api_key = self.settings.bailian_api_key or self.settings.dashscope_api_key
+        if not api_key:
+            return None
+
+        lines = []
+        for msg in messages:
+            role = "用户" if msg.role == "user" else "助手"
+            suffix = "（待确认）" if msg.requires_review else ""
+            lines.append(f"{role}: {content_preview(msg.content_json)}{suffix}")
+        dialogue_text = "\n".join(lines)
+
+        user_content = ""
+        if previous_summary_text:
+            user_content += f"此前摘要:\n{previous_summary_text}\n\n"
+        user_content += f"最新对话:\n{dialogue_text}"
+
+        system_prompt = (
+            "你是 LetMeFit 健身助手的对话摘要模块。"
+            "请将用户提供的对话（可能包含此前摘要和最新对话）合并压缩为简洁中文摘要。"
+            "保留：已确认的饮食/体重记录的关键数字、用户的明确意图、待确认记录（标注'待确认'）。"
+            "删除：寒暄、重复追问、冗余解释。"
+            f"输出纯文本，不超过 {max(100, max_chars - 50)} 字，不要 Markdown、不要 JSON。"
+        )
+
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=api_key,
+                base_url=self.settings.bailian_base_url,
+                timeout=20,
+                max_retries=0,
+            )
+            completion = client.chat.completions.create(
+                model=self.settings.summary_llm_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.3,
+                max_tokens=600,
+            )
+            content = completion.choices[0].message.content if completion.choices else None
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+            return None
+        except Exception:
+            return None
+
     def compose_summary(
         self,
         previous_summary_text: str | None,
         messages: list[ConversationMessage],
         max_chars: int,
     ) -> str:
-        lines = ["滚动摘要，用于后续模型上下文；正式事实以档案和记录表为准。"]
-        if previous_summary_text:
-            lines.append(f"此前摘要: {previous_summary_text}")
+        header = _SUMMARY_HEADER
+        message_lines = []
         for message in messages:
             role = "用户" if message.role == "user" else "助手"
             suffix = "；需用户确认" if message.requires_review else ""
-            lines.append(f"{role}: {content_preview(message.content_json)}{suffix}")
-        return truncate_text("\n".join(lines), max_chars)
+            message_lines.append(f"{role}: {content_preview(message.content_json)}{suffix}")
+        new_content = "\n".join(message_lines)
+
+        if not previous_summary_text:
+            base = f"{header}\n{new_content}" if new_content else header
+            return truncate_text(base, max_chars)
+
+        prev_prefix = "此前摘要: "
+        # Budget for previous summary = total - header - new messages - separators - prefix
+        base_len = len(header) + (len("\n") + len(new_content) if new_content else 0)
+        budget = max_chars - base_len - len("\n") - len(prev_prefix)
+
+        if budget <= 20:
+            base = f"{header}\n{new_content}" if new_content else header
+            return truncate_text(base, max_chars)
+
+        # Keep the tail of previous summary (most recent content first)
+        if len(previous_summary_text) > budget:
+            prev_text = "…" + previous_summary_text[-(budget - 1):]
+        else:
+            prev_text = previous_summary_text
+
+        parts = [header, f"{prev_prefix}{prev_text}"]
+        if new_content:
+            parts.append(new_content)
+        return "\n".join(parts)
 
 
 def content_preview(content_json: Any, max_chars: int = 240) -> str:
@@ -694,7 +770,22 @@ def truncate_text(value: str, max_chars: int) -> str:
 def estimate_tokens(value: str) -> int:
     if not value:
         return 0
-    return max(1, len(value) // 4)
+    chinese = sum(1 for c in value if "一" <= c <= "鿿")
+    other = len(value) - chinese
+    return max(1, int(chinese * 1.5 + other / 4))
+
+
+def _estimate_message_tokens(message: ConversationMessage) -> int:
+    content = message.content_json
+    if isinstance(content, list):
+        text = " ".join(
+            str(item.get("text") or "")
+            for item in content
+            if isinstance(item, dict)
+        )
+    else:
+        text = str(content or "")
+    return estimate_tokens(text)
 
 
 def _float_or_none(value: Any) -> float | None:

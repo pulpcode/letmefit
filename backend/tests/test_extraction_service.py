@@ -534,14 +534,7 @@ def test_extraction_service_recent_user_message_creates_confirmation_card_only()
         conversation_id="conv_test",
         message_id="msg_test",
         content=[MessageContentItem(type="text", text="就按上一条记录")],
-        context={
-            "recent_messages": [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": "今天体重72.4公斤"}],
-                }
-            ]
-        },
+        context={},
     )
 
     assert result["committed_records"] == []
@@ -634,14 +627,7 @@ def test_extraction_service_assistant_plan_creates_confirmation_card_only() -> N
         conversation_id="conv_test",
         message_id="msg_test",
         content=[MessageContentItem(type="text", text="可以，就这么记录吧")],
-        context={
-            "recent_messages": [
-                {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "建议晚餐吃清蒸鱼和西兰花。"}],
-                }
-            ]
-        },
+        context={},
     )
 
     assert result["committed_records"] == []

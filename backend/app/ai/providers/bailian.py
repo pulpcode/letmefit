@@ -247,6 +247,7 @@ class BailianExtractionProvider(ExtractionProvider):
         return messages
 
     def _history_message_text(self, msg: dict[str, Any]) -> str:
+        MAX_CHARS = 2000
         content = msg.get("content")
         if isinstance(content, list):
             parts = [
@@ -256,8 +257,9 @@ class BailianExtractionProvider(ExtractionProvider):
             ]
             text = " ".join(p for p in parts if p).strip()
             if text:
-                return text
-        return str(msg.get("content_preview") or "").strip()
+                return text[:MAX_CHARS]
+        preview = str(msg.get("content_preview") or "").strip()
+        return preview[:MAX_CHARS]
 
     def _user_prompt(self, payload: ExtractionInput) -> str:
         request = build_extraction_user_prompt_payload(payload)

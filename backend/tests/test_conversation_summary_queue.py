@@ -2,7 +2,7 @@ from datetime import datetime
 
 from app.core.config import Settings
 from app.models import ConversationMessage, ConversationSummary
-from app.services.conversation_context import ConversationSummaryService
+from app.services.conversation_context import LOCAL_SUMMARY_MODEL_NAME, ConversationSummaryService
 
 
 class FakeDb:
@@ -74,8 +74,8 @@ def test_enqueue_summary_job_without_generating_summary_text(monkeypatch) -> Non
         db=db,
         settings=Settings(
             jwt_secret_key="test-secret-key-with-enough-length",
-            conversation_summary_trigger_messages=3,
-            conversation_context_short_term_full_turns=1,
+            conversation_summary_trigger_tokens=3,
+            conversation_summary_keep_tokens=2,
         ),
     )
     messages = [_message(f"msg_{index}") for index in range(5)]
@@ -112,6 +112,7 @@ def test_process_summary_job_marks_succeeded(monkeypatch) -> None:
 
     monkeypatch.setattr(service, "_previous_succeeded_summary", lambda _: None)
     monkeypatch.setattr(service, "_messages_for_summary_job", lambda _: messages)
+    monkeypatch.setattr(service, "_llm_summarize", lambda *_, **__: None)
 
     assert service.process_job(job) is True
 
@@ -227,3 +228,154 @@ def test_process_pending_jobs_commits_stale_recovery(monkeypatch) -> None:
 
     assert stats["recovered"] == 2
     assert db.commit_count == 1
+
+
+def test_enqueue_uses_incremental_from_message_id_after_previous_summary(monkeypatch) -> None:
+    # Fix: when a previous summary exists, from_message_id should be the first NEW message
+    # (after the previous summary's to_message_id), not the previous summary's from_message_id.
+    db = FakeDb()
+    service = ConversationSummaryService(
+        db=db,
+        settings=Settings(
+            jwt_secret_key="test-secret-key-with-enough-length",
+            conversation_summary_trigger_tokens=2,
+            conversation_summary_keep_tokens=2,
+        ),
+    )
+    # Messages 0-4 exist; previous summary covers msg_0..msg_1
+    previous_summary = ConversationSummary(
+        id="conv_sum_prev",
+        conversation_id="conv_test",
+        user_id="user_test",
+        from_message_id="msg_0",
+        to_message_id="msg_1",
+        summary_type="rolling",
+        status="succeeded",
+        summary_text="previous summary text",
+        summary_json=None,
+        token_estimate=None,
+        model_name=None,
+        created_at=datetime(2026, 5, 5, 12, 0, 0),
+        updated_at=datetime(2026, 5, 5, 12, 0, 0),
+    )
+    all_messages = [_message(f"msg_{i}") for i in range(5)]
+    # messages_after_summary = msg_2, msg_3, msg_4 (after previous summary's to_message_id)
+    messages_after = all_messages[2:]
+
+    monkeypatch.setattr(service.context_builder, "latest_summary", lambda *_: previous_summary)
+    monkeypatch.setattr(service.context_builder, "_conversation_messages", lambda *_: all_messages)
+    monkeypatch.setattr(
+        service.context_builder,
+        "_messages_after_summary",
+        lambda current_messages, _: messages_after,
+    )
+    monkeypatch.setattr(service, "_active_summary_job", lambda *_: None)
+
+    job = service.enqueue_if_needed("user_test", "conv_test")
+
+    assert job is not None
+    # from_message_id must be msg_2 (first new message), not msg_0 (previous summary's from)
+    assert job.from_message_id == "msg_2"
+    assert job.to_message_id == "msg_2"
+
+
+def test_compose_summary_preserves_new_messages_when_previous_summary_is_long() -> None:
+    # Fix: when previous summary is long, new messages must be preserved (not truncated).
+    # Old behaviour kept first max_chars bytes, which dropped new messages entirely.
+    db = FakeDb()
+    service = ConversationSummaryService(
+        db=db,
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+    long_prev = "x" * 1800
+    msg = ConversationMessage(
+        id="msg_new",
+        conversation_id="conv_test",
+        user_id="user_test",
+        role="user",
+        content_json=[{"type": "text", "text": "新消息内容"}],
+        intent=None,
+        requires_review=False,
+        created_at=datetime(2026, 5, 5, 13, 0, 0),
+    )
+
+    result = service.compose_summary(
+        previous_summary_text=long_prev,
+        messages=[msg],
+        max_chars=2000,
+    )
+
+    assert "新消息内容" in result
+    assert len(result) <= 2000
+
+
+def test_compose_summary_keeps_tail_of_previous_summary() -> None:
+    # The tail (most recent part) of the previous summary should be preserved.
+    db = FakeDb()
+    service = ConversationSummaryService(
+        db=db,
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+    prev = "OLD_CONTENT_START " + "middle " * 50 + "RECENT_CONTENT_END"
+    msg = ConversationMessage(
+        id="msg_x",
+        conversation_id="conv_test",
+        user_id="user_test",
+        role="user",
+        content_json=[{"type": "text", "text": "新"}],
+        intent=None,
+        requires_review=False,
+        created_at=datetime(2026, 5, 5, 13, 0, 0),
+    )
+
+    result = service.compose_summary(
+        previous_summary_text=prev,
+        messages=[msg],
+        max_chars=300,
+    )
+
+    assert "RECENT_CONTENT_END" in result
+    assert len(result) <= 300
+
+
+def test_process_job_uses_llm_when_available(monkeypatch) -> None:
+    db = FakeDb()
+    service = ConversationSummaryService(
+        db=db,
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+    job = _job()
+    messages = [_message("msg_0"), _message("msg_1")]
+
+    monkeypatch.setattr(service, "_previous_succeeded_summary", lambda _: None)
+    monkeypatch.setattr(service, "_messages_for_summary_job", lambda _: messages)
+    monkeypatch.setattr(service, "_llm_summarize", lambda *_, **__: "LLM生成的摘要内容")
+
+    assert service.process_job(job) is True
+
+    assert "正式事实以档案和记录表为准" in job.summary_text
+    assert "LLM生成的摘要内容" in job.summary_text
+    assert job.model_name == service.settings.summary_llm_model
+    assert job.summary_json["method"] == service.settings.summary_llm_model
+    assert job.token_estimate is not None
+
+
+def test_process_job_falls_back_to_rule_when_llm_returns_none(monkeypatch) -> None:
+    db = FakeDb()
+    service = ConversationSummaryService(
+        db=db,
+        settings=Settings(jwt_secret_key="test-secret-key-with-enough-length"),
+    )
+    job = _job()
+    messages = [_message("msg_0"), _message("msg_1")]
+
+    monkeypatch.setattr(service, "_previous_succeeded_summary", lambda _: None)
+    monkeypatch.setattr(service, "_messages_for_summary_job", lambda _: messages)
+    monkeypatch.setattr(service, "_llm_summarize", lambda *_, **__: None)
+
+    assert service.process_job(job) is True
+
+    assert "正式事实以档案和记录表为准" in job.summary_text
+    assert "用户: msg_0" in job.summary_text
+    assert job.model_name == LOCAL_SUMMARY_MODEL_NAME
+    assert job.summary_json["method"] == LOCAL_SUMMARY_MODEL_NAME

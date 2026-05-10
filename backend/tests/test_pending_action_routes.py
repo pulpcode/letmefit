@@ -10,7 +10,7 @@ from app.core.errors import AppError
 from app.main import create_app
 from app.models import User
 from app.schemas.pending_action import (
-    PendingActionContinuationRequest,
+    PendingActionAgentRequest,
     PendingActionUpdateRequest,
 )
 from app.services.pending_actions import PendingActionService, get_pending_action_service
@@ -40,9 +40,9 @@ class FakePendingActionService:
         self,
         user_id: str,
         pending_action_id: str,
-        payload: PendingActionContinuationRequest | None = None,
+        payload: PendingActionAgentRequest | None = None,
     ) -> dict:
-        payload = payload or PendingActionContinuationRequest()
+        payload = payload or PendingActionAgentRequest()
         self.calls.append(("confirm", user_id, pending_action_id, payload.include_agent_trace))
         response = {
             "pending_action_id": pending_action_id,
@@ -67,9 +67,9 @@ class FakePendingActionService:
         self,
         user_id: str,
         pending_action_id: str,
-        payload: PendingActionContinuationRequest | None = None,
+        payload: PendingActionAgentRequest | None = None,
     ) -> dict:
-        payload = payload or PendingActionContinuationRequest()
+        payload = payload or PendingActionAgentRequest()
         self.calls.append(("discard", user_id, pending_action_id, payload.include_agent_trace))
         response = {
             "pending_action_id": pending_action_id,
@@ -168,6 +168,24 @@ def test_confirm_and_discard_include_agent_trace_when_requested() -> None:
         ("confirm", "user_test", "pa_test", True),
         ("discard", "user_test", "pa_other", True),
     ]
+
+
+def test_confirm_and_discard_reject_removed_continuation_switch() -> None:
+    service = FakePendingActionService()
+    client = TestClient(_authorized_app(service))
+
+    confirm = client.post(
+        "/v1/agent/pending-actions/pa_test/confirm",
+        json={"continue_agent": False},
+    )
+    discard = client.post(
+        "/v1/agent/pending-actions/pa_other/discard",
+        json={"continue_agent": True},
+    )
+
+    assert confirm.status_code == 422
+    assert discard.status_code == 422
+    assert service.calls == []
 
 
 def test_run_continuation_passes_pending_action_observation_context(monkeypatch) -> None:
@@ -312,7 +330,9 @@ def test_update_action_status_is_decided_by_backend_rules() -> None:
         "user_test",
         "pa_test",
         PendingActionUpdateRequest(
-            draft_payload={"items": [{"name": "炒面", "portion_text": "200g", "portion_grams": 200}]}
+            draft_payload={
+                "items": [{"name": "炒面", "portion_text": "200g", "portion_grams": 200}]
+            }
         ),
         commit=False,
     )

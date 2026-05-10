@@ -576,10 +576,6 @@
               <input id="includeAgentTrace" type="checkbox" checked />
               显示 Agent Trace
             </label>
-            <label class="checkbox">
-              <input id="continueAgentAfterConfirm" type="checkbox" checked />
-              确认/放弃后继续 Agent
-            </label>
           </div>
           <div class="input-row">
             <textarea id="messageText" rows="3">今天午餐吃了鸡胸肉和一碗米饭，体重72.4公斤</textarea>
@@ -856,10 +852,6 @@
         return $("includeAgentTrace").checked;
       }
 
-      function continueAgentAfterConfirm() {
-        return $("continueAgentAfterConfirm").checked;
-      }
-
       function messagePartText(part) {
         if (!part || typeof part !== "object") {
           return String(part || "");
@@ -1065,7 +1057,6 @@
           api(`/agent/pending-actions/${pendingActionId}/confirm`, {
             method: "POST",
             body: {
-              continue_agent: continueAgentAfterConfirm(),
               include_agent_trace: includeAgentTrace(),
             },
           }),
@@ -1080,7 +1071,6 @@
           api(`/agent/pending-actions/${pendingActionId}/discard`, {
             method: "POST",
             body: {
-              continue_agent: continueAgentAfterConfirm(),
               include_agent_trace: includeAgentTrace(),
             },
           }),
@@ -1643,7 +1633,6 @@
               {
                 method: "POST",
                 body: {
-                  continue_agent: continueAgentAfterConfirm() && index === pendingActions.length - 1,
                   include_agent_trace: includeAgentTrace(),
                 },
               },

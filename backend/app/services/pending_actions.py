@@ -16,7 +16,7 @@ from app.core.errors import AppError
 from app.models import AgentPendingAction, Conversation, ConversationMessage
 from app.schemas.conversation import MessageContentItem
 from app.schemas.pending_action import (
-    PendingActionContinuationRequest,
+    PendingActionAgentRequest,
     PendingActionUpdateRequest,
     decimal_to_float,
 )
@@ -28,7 +28,6 @@ from app.services.pending_action_lifecycle import (
     CONFIRMABLE_PENDING_ACTION_STATUS,
     EDITABLE_PENDING_ACTION_STATUSES,
     EXPIRED,
-    NEEDS_CLARIFICATION,
     classify_pending_action_status,
     normalize_status_warnings,
     pending_action_is_expired,
@@ -153,9 +152,9 @@ class PendingActionService:
         self,
         user_id: str,
         pending_action_id: str,
-        payload: PendingActionContinuationRequest | None = None,
+        payload: PendingActionAgentRequest | None = None,
     ) -> dict:
-        payload = payload or PendingActionContinuationRequest()
+        payload = payload or PendingActionAgentRequest()
         action = self._get_owned_action(user_id, pending_action_id, lock=True)
         if action.status == "committed":
             return self._committed_response(action)
@@ -183,9 +182,9 @@ class PendingActionService:
         self,
         user_id: str,
         pending_action_id: str,
-        payload: PendingActionContinuationRequest | None = None,
+        payload: PendingActionAgentRequest | None = None,
     ) -> dict:
-        payload = payload or PendingActionContinuationRequest()
+        payload = payload or PendingActionAgentRequest()
         action = self._get_owned_action(user_id, pending_action_id, lock=True)
         if action.status == "discarded":
             return {
@@ -458,7 +457,7 @@ class PendingActionService:
         include_agent_trace: bool,
     ) -> dict[str, Any] | None:
         try:
-            conversation = self._get_owned_conversation(action.user_id, action.conversation_id)
+            self._get_owned_conversation(action.user_id, action.conversation_id)
             context = ConversationContextBuilder(self.db).build(
                 user_id=action.user_id,
                 conversation_id=action.conversation_id,

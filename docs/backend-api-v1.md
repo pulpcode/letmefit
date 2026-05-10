@@ -968,16 +968,15 @@ out_of_scope
 
 确认成功后，`agent_pending_actions.status` 更新为 `committed`，并写入 `committed_record_type` 和 `committed_record_id`。正式记录会写入 `source_pending_action_id`，用于从记录反查来源确认动作。
 
-请求体可省略。正式客户端默认可不传 `continue_agent`；只有需要继续总结、回答剩余问题或调试 trace 时才传：
+请求体可省略。确认成功后，后端固定构造一条内部 `pending_action_observation`，把“用户已确认并保存该记录”的结构化消息交给 Agent 继续生成回复。客户端不提供续跑开关。
+
+调试时可传 `include_agent_trace=true`，它只控制响应是否带脱敏 trace，不影响是否继续 Agent：
 
 ```json
 {
-  "continue_agent": true,
   "include_agent_trace": true
 }
 ```
-
-后端默认 `continue_agent=false`，用于兼容旧客户端或只想写入记录、不需要继续对话的后台调用。
 
 响应：
 
@@ -987,13 +986,22 @@ out_of_scope
     "pending_action_id": "pa_...",
     "status": "committed",
     "record_type": "meal",
-    "record_id": "meal_..."
+    "record_id": "meal_...",
+    "continuation": {
+      "assistant_message_id": "msg_...",
+      "assistant_text": "已确认午餐，我继续帮你安排今晚晚餐...",
+      "intent": "answer_fitness_question",
+      "requires_review": false,
+      "pending_actions": [],
+      "committed_records": [],
+      "tool_results": []
+    }
   },
   "request_id": "req_..."
 }
 ```
 
-当 `continue_agent=true` 且 continuation 成功时，`data` 会额外包含 `continuation`。这是确认动作之后新生成的助手回复，不是用户的“确认”文本：
+当 `include_agent_trace=true` 且 Agent 续跑成功时，`continuation` 会额外包含 `agent_trace`。这是确认动作之后新生成的助手回复，不是用户的“确认”文本：
 
 ```json
 {
@@ -1016,7 +1024,7 @@ out_of_scope
 
 放弃待确认动作。
 
-请求体同 confirm，可省略。传 `continue_agent=true` 时，后端会把放弃事件作为 `pending_action_observation` 交给模型，让模型判断是否仍可在不保存该记录的前提下继续回答，或是否需要追问。
+请求体同 confirm，可省略。放弃成功后，后端同样会把放弃事件作为 `pending_action_observation` 交给模型，让模型判断是否仍可在不保存该记录的前提下继续回答，或是否需要追问。客户端不提供续跑开关。
 
 响应：
 
@@ -1024,13 +1032,20 @@ out_of_scope
 {
   "data": {
     "pending_action_id": "pa_...",
-    "status": "discarded"
+    "status": "discarded",
+    "continuation": {
+      "assistant_message_id": "msg_...",
+      "assistant_text": "已放弃这条候选记录，我不会保存它。",
+      "intent": "fitness_record",
+      "requires_review": false,
+      "pending_actions": [],
+      "committed_records": [],
+      "tool_results": []
+    }
   },
   "request_id": "req_..."
 }
 ```
-
-当 `continue_agent=true` 且 continuation 成功时，响应同样可包含 `continuation`。
 
 ## 10. 文件上传与媒体引用
 

@@ -374,6 +374,19 @@
   padding-left: 88rpx;
 }
 
+.system-notice-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 6rpx 72rpx;
+}
+
+.system-notice-text {
+  font-size: 22rpx;
+  line-height: 1.4;
+  color: rgba(107, 114, 128, 0.72);
+  text-align: center;
+}
+
 .superseded-wrap {
   display: flex;
   justify-content: center;
@@ -390,6 +403,54 @@
 }
 
 /* ========== 输入栏 ========== */
+.draft-attachments {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(134rpx + env(safe-area-inset-bottom));
+  z-index: 4;
+  min-height: 152rpx;
+  padding: 20rpx 32rpx 18rpx;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  background: #ffffff;
+  border-top: 2rpx solid #e5e7eb;
+}
+
+.draft-image-card {
+  position: relative;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 18rpx;
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.draft-image {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 18rpx;
+  display: block;
+  background: #edf1f5;
+  border: 2rpx solid rgba(0, 180, 216, 0.16);
+}
+
+.draft-remove-btn {
+  position: absolute;
+  top: -12rpx;
+  right: -12rpx;
+  width: 38rpx;
+  height: 38rpx;
+  border-radius: 9999rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(16, 24, 40, 0.82);
+  border: 2rpx solid rgba(255, 255, 255, 0.86);
+  padding: 0;
+}
+
 .chat-input-bar {
   position: fixed;
   left: 0;
@@ -415,6 +476,10 @@
   justify-content: center;
   background: #f5f7fa;
   border: 2rpx solid #edf1f5;
+}
+
+.tool-btn.disabled {
+  opacity: 0.5;
 }
 
 .voice-btn-active {

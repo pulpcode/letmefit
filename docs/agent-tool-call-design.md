@@ -24,7 +24,7 @@ User message
 - `committed`：用户确认已有确认卡后写入正式记录，作为普通 tool observation 回填。
 - `rejected`：作为普通 tool observation 回填，允许模型下一轮追问或解释失败原因。
 
-用户确认、修改后确认、放弃确认卡时，正式客户端默认先由后端接口处理状态和写入。只有需要继续总结、回答剩余问题或客户端显式请求时，才传入 `continue_agent=true`；后端会把该动作构造成 `pending_action_observation`，作为新一轮 ReAct 的当前输入交给模型。这里不会把按钮文案“确认”当作普通用户消息发送给模型。
+用户确认、修改后确认、放弃确认卡时，正式客户端先由后端接口处理状态和写入；入库或放弃成功后，后端固定把该动作构造成 `pending_action_observation`，作为新一轮 ReAct 的当前输入交给模型。客户端不提供续跑开关，也不会把按钮文案“确认”当作普通用户消息发送给模型。
 
 用户给出修改意见时优先更新现有 pending action，而不是创建新草稿。结构化编辑直接 PATCH `draft_payload`；普通聊天中的自然语言修改交给 LLM 判断，LLM 应调用 `update_pending_action` 工具更新原草稿。用户明确表达保存或确认待确认草稿时，LLM 应调用 `commit_pending_action`；批量确认/放弃时调用 `commit_pending_actions` / `discard_pending_actions`。后端不靠关键词判断“修改/保存”意图，只校验工具调用引用的 pending action、当前用户消息 evidence、用户归属、状态和过期时间。
 
@@ -224,16 +224,15 @@ loop_limit_reached
 
 ## Pending Action Observation
 
-确认卡的用户动作可恢复异步 ReAct。接口请求体：
+确认卡的用户动作会恢复异步 ReAct。接口请求体可省略；调试时可传 `include_agent_trace=true`，该字段只控制响应是否带脱敏 trace，不影响是否续跑 Agent：
 
 ```json
 {
-  "continue_agent": true,
   "include_agent_trace": true
 }
 ```
 
-确认成功后，后端内部构造 observation：
+确认成功并完成正式记录写入后，后端内部构造 observation：
 
 ```json
 {

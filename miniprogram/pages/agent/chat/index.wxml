@@ -78,6 +78,9 @@
         <view wx:elif="{{item.kind === 'pending_action'}}" class="pending-wrap">
           <pending-action-card action="{{item.action}}" bind:confirm="onConfirmAction" bind:discard="onDiscardAction" bind:edit="onEditAction" />
         </view>
+        <view wx:elif="{{item.kind === 'system_notice'}}" class="system-notice-wrap">
+          <text class="system-notice-text">{{item.text}}</text>
+        </view>
         <view wx:elif="{{item.kind === 'pending_action_superseded'}}" class="superseded-wrap">
           <text class="superseded-text">卡片信息已更新</text>
         </view>
@@ -102,9 +105,29 @@
     </view>
   </scroll-view>
 
+  <!-- 待发送图片 -->
+  <view wx:if="{{draftImages.length}}" class="draft-attachments" style="{{draftTrayStyle}}">
+    <view
+      wx:for="{{draftImages}}"
+      wx:key="id"
+      class="draft-image-card"
+    >
+      <image
+        class="draft-image"
+        src="{{item.localPath}}"
+        mode="aspectFill"
+        data-src="{{item.localPath}}"
+        bindtap="previewDraftImage"
+      />
+      <button class="draft-remove-btn" data-id="{{item.id}}" bindtap="removeDraftImage" aria-label="移除图片">
+        <t-icon name="close" size="22rpx" color="#ffffff" />
+      </button>
+    </view>
+  </view>
+
   <!-- 输入栏：图片 | 输入框 | 麦克风 | 发送 -->
   <view class="chat-input-bar" style="{{inputBarStyle}}">
-    <button class="tool-btn image-entry" bindtap="chooseImageSource" aria-label="图片">
+    <button class="tool-btn image-entry {{sending ? 'disabled' : ''}}" bindtap="chooseImageSource" aria-label="图片">
       <t-icon name="logo-instagram" size="42rpx" color="#536171" />
     </button>
     <input
@@ -125,8 +148,8 @@
     >
       <t-icon name="microphone" size="42rpx" color="{{recording ? '#ffffff' : '#536171'}}" />
     </button>
-    <button class="send-btn {{!inputValue || sending ? 'disabled' : ''}}" bindtap="onSend" aria-label="发送">
-      <t-icon name="{{inputValue && !sending ? 'send-filled' : 'send'}}" size="34rpx" color="{{inputValue && !sending ? '#ffffff' : '#6a7282'}}" />
+    <button class="send-btn {{(!inputValue && !draftImages.length) || sending ? 'disabled' : ''}}" bindtap="onSend" aria-label="发送">
+      <t-icon name="{{(inputValue || draftImages.length) && !sending ? 'send-filled' : 'send'}}" size="34rpx" color="{{(inputValue || draftImages.length) && !sending ? '#ffffff' : '#6a7282'}}" />
     </button>
   </view>
 

@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PendingActionUpdateRequest(BaseModel):
@@ -10,7 +10,9 @@ class PendingActionUpdateRequest(BaseModel):
     user_note: str | None = Field(default=None, max_length=2000)
 
 
-class PendingActionContinuationRequest(BaseModel):
+class PendingActionAgentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     include_agent_trace: bool = False
 
 

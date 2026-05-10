@@ -10,6 +10,9 @@ const VOICE_MAX_SECONDS = 20;
 const VOICE_MIN_DURATION_MS = 800;
 const VOICE_MIN_BYTES = 4 * 1024;
 const VOICE_TICK_MS = 200;
+const DRAFT_TRAY_HEIGHT_RPX = 152;
+const INPUT_BAR_HEIGHT_RPX = 134;
+const FLOATING_GAP_RPX = 16;
 
 type ChatItem =
   | {
@@ -29,6 +32,7 @@ type ChatItem =
       streaming: boolean;
       createdAt: string;
     }
+  | { kind: "system_notice"; id: string; text: string; createdAt: string }
   | { kind: "pending_action"; id: string; action: PendingAction; createdAt: string }
   | { kind: "pending_action_superseded"; id: string; pendingActionId: string; createdAt: string };
 
@@ -38,12 +42,19 @@ type ChatImage = {
   source?: string;
 };
 
+type DraftImage = {
+  id: string;
+  localPath: string;
+  source: "camera" | "album";
+};
+
 interface ParsedMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   images: ChatImage[];
   visionText: string;
+  noticeText: string;
   createdAt: string;
 }
 
@@ -70,6 +81,7 @@ function parseConversationMessage(message: ConversationMessage): ParsedMessage {
   const parts = message.content || [];
   const texts: string[] = [];
   const visionTexts: string[] = [];
+  const noticeTexts: string[] = [];
   const images: ChatImage[] = [];
 
   for (const part of parts as any[]) {
@@ -91,7 +103,10 @@ function parseConversationMessage(message: ConversationMessage): ParsedMessage {
         texts.push("📷 图片");
       }
     } else if (part.type === "event") {
-      texts.push(part.text || "");
+      const notice = eventNoticeText(part);
+      if (notice) {
+        noticeTexts.push(notice);
+      }
     }
   }
 
@@ -101,8 +116,19 @@ function parseConversationMessage(message: ConversationMessage): ParsedMessage {
     text: texts.filter(Boolean).join("\n"),
     images,
     visionText: visionTexts.filter(Boolean).join("\n"),
+    noticeText: noticeTexts.filter(Boolean).join(" · "),
     createdAt: message.created_at
   };
+}
+
+function eventNoticeText(part: any): string {
+  if (part.event_type === "record_committed") {
+    return "已保存到正式记录";
+  }
+  if (part.event_type === "pending_action_discarded") {
+    return "已放弃候选记录";
+  }
+  return part.text || part.event_type || "";
 }
 
 function stripAsrPrefix(text: string): string {
@@ -170,6 +196,14 @@ function buildChatItems(messages: ParsedMessage[], pendingActions: PendingAction
         createdAt: msg.createdAt
       });
     }
+    if (msg.noticeText) {
+      items.push({
+        kind: "system_notice",
+        id: `${msg.id}_notice`,
+        text: msg.noticeText,
+        createdAt: msg.createdAt
+      });
+    }
   }
   for (const pa of pendingActions) {
     if (pa.status === "pending_confirmation") {
@@ -185,10 +219,11 @@ function buildChatItems(messages: ParsedMessage[], pendingActions: PendingAction
 }
 
 function chatItemOrder(item: ChatItem): number {
-  if (item.kind === "message") return item.role === "user" ? 0 : 2;
+  if (item.kind === "message") return item.role === "user" ? 0 : 3;
   if (item.kind === "vision_reasoning") return 1;
-  if (item.kind === "pending_action") return 3;
-  return 4;
+  if (item.kind === "system_notice") return 2;
+  if (item.kind === "pending_action") return 4;
+  return 5;
 }
 
 Page({
@@ -210,7 +245,10 @@ Page({
     scrollIntoView: "bottom-anchor",
     scrollStyle: "",
     inputBarStyle: "",
+    draftTrayStyle: "",
     voiceCardStyle: "",
+    draftImages: [] as DraftImage[],
+    draftImageUrls: [] as string[],
   },
 
   recorder: null as any,
@@ -218,6 +256,7 @@ Page({
   _voiceStartY: 0,
   _voiceTouchActive: false,
   _voiceElapsedMs: 0,
+  _keyboardHeight: 0,
 
   onLoad(options: any) {
     const { conversationId, title, placeholder } = options || {};
@@ -312,7 +351,7 @@ Page({
       ]);
       const messages: ParsedMessage[] = (messageData.messages || [])
         .map((msg) => parseConversationMessage(msg))
-        .filter((msg) => msg.text || msg.images.length || msg.visionText);
+        .filter((msg) => msg.text || msg.images.length || msg.visionText || msg.noticeText);
       this.setData({
         chatItems: buildChatItems(messages, pendingData.pending_actions || [])
       });
@@ -328,9 +367,58 @@ Page({
 
   async onSend() {
     const text = this.data.inputValue.trim();
-    if (!text || this.data.sending) return;
+    const draftImages = this.data.draftImages;
+    if ((!text && !draftImages.length) || this.data.sending) return;
+    if (draftImages.length) {
+      await this.sendDraftContent(text, draftImages);
+      return;
+    }
     this.setData({ inputValue: "" });
     await this.sendContent([{ type: "text", text }], text);
+  },
+
+  async sendDraftContent(text: string, draftImages: DraftImage[]) {
+    this.setData({ sending: true });
+    const conversationId = await this.ensureConversation();
+    if (!conversationId) {
+      this.setData({ sending: false });
+      return;
+    }
+
+    try {
+      const uploadedImages: ChatImage[] = [];
+      const imageParts: MessagePart[] = [];
+      for (const image of draftImages) {
+        const upload = await uploadLocalFile({
+          filePath: image.localPath,
+          mime_type: "image/jpeg",
+          source: image.source
+        });
+        imageParts.push({
+          type: "image",
+          file_id: upload.file.id,
+          source: image.source
+        });
+        uploadedImages.push({
+          fileId: upload.file.id,
+          url: image.localPath || upload.file.object_key || "",
+          source: image.source
+        });
+      }
+
+      const content: MessagePart[] = [
+        ...(text ? [{ type: "text" as const, text }] : []),
+        ...imageParts
+      ];
+      this.setData({ inputValue: "", draftImages: [], draftImageUrls: [] });
+      this._updateComposerLayout();
+      await this.sendContent(content, text, {
+        userImages: uploadedImages.filter((image) => image.url)
+      });
+    } catch (error) {
+      showApiError(error);
+      this.setData({ sending: false });
+    }
   },
 
   sendContent(content: MessagePart[], userPreview: string, options?: { userImages?: ChatImage[] }) {
@@ -560,6 +648,7 @@ Page({
   },
 
   async chooseImage(source: "camera" | "album") {
+    if (this.data.sending) return;
     try {
       const res = await wx.chooseMedia({
         count: 1,
@@ -568,26 +657,40 @@ Page({
         sizeType: ["compressed"]
       });
       const file = res.tempFiles[0];
-      const upload = await uploadLocalFile({
-        filePath: file.tempFilePath,
-        mime_type: "image/jpeg",
+      const draftImages = [{
+        id: `draft_image_${Date.now()}`,
+        localPath: file.tempFilePath,
         source
+      }];
+      this.setData({
+        draftImages,
+        draftImageUrls: draftImages.map((image) => image.localPath)
       });
-      await this.sendContent(
-        [{ type: "image", file_id: upload.file.id, source }],
-        "",
-        {
-          userImages: [{
-            fileId: upload.file.id,
-            url: file.tempFilePath || upload.file.object_key || "",
-            source
-          }].filter((image) => image.url)
-        }
-      );
+      this._updateComposerLayout();
+      this.scrollToBottom();
     } catch (error) {
       if ((error as any)?.errMsg?.includes("cancel")) return;
       showApiError(error);
     }
+  },
+
+  removeDraftImage(event: any) {
+    const imageId = event.currentTarget?.dataset?.id;
+    const draftImages = this.data.draftImages.filter((image) => image.id !== imageId);
+    this.setData({
+      draftImages,
+      draftImageUrls: draftImages.map((image) => image.localPath)
+    });
+    this._updateComposerLayout();
+  },
+
+  previewDraftImage(event: any) {
+    const current = event.currentTarget?.dataset?.src;
+    if (!current) return;
+    wx.previewImage({
+      current,
+      urls: this.data.draftImageUrls.length ? this.data.draftImageUrls : [current]
+    });
   },
 
   // ========== 语音录制：按住触发 ==========
@@ -1018,18 +1121,36 @@ Page({
   },
 
   _updateLayoutForKeyboard(kh: number) {
+    this._keyboardHeight = kh;
+    this._updateComposerLayout();
+  },
+
+  _updateComposerLayout() {
+    const kh = this._keyboardHeight;
+    const hasDraft = this.data.draftImages.length > 0;
     if (kh > 0) {
       const info = wx.getWindowInfo();
       const r = info.windowWidth / 750;
-      const inputBarPx = Math.ceil(134 * r);
-      const gapPx = Math.ceil(16 * r);
+      const inputBarPx = Math.ceil(INPUT_BAR_HEIGHT_RPX * r);
+      const draftTrayPx = hasDraft ? Math.ceil(DRAFT_TRAY_HEIGHT_RPX * r) : 0;
+      const gapPx = Math.ceil(FLOATING_GAP_RPX * r);
       this.setData({
-        scrollStyle: `bottom: ${inputBarPx + kh}px`,
+        scrollStyle: `bottom: ${inputBarPx + draftTrayPx + kh}px`,
         inputBarStyle: `bottom: ${kh}px`,
-        voiceCardStyle: `bottom: ${inputBarPx + kh + gapPx}px`,
+        draftTrayStyle: `bottom: ${inputBarPx + kh}px`,
+        voiceCardStyle: `bottom: ${inputBarPx + draftTrayPx + kh + gapPx}px`,
       });
     } else {
-      this.setData({ scrollStyle: "", inputBarStyle: "", voiceCardStyle: "" });
+      this.setData({
+        scrollStyle: hasDraft
+          ? `bottom: calc(${INPUT_BAR_HEIGHT_RPX + DRAFT_TRAY_HEIGHT_RPX}rpx + env(safe-area-inset-bottom))`
+          : "",
+        inputBarStyle: "",
+        draftTrayStyle: "",
+        voiceCardStyle: hasDraft
+          ? `bottom: calc(${INPUT_BAR_HEIGHT_RPX + DRAFT_TRAY_HEIGHT_RPX + FLOATING_GAP_RPX}rpx + env(safe-area-inset-bottom))`
+          : "",
+      });
     }
   },
 

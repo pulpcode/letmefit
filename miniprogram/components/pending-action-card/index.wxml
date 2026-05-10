@@ -74,6 +74,6 @@
   <view class="pending-actions {{card.needsClarification ? 'pending-actions-clarify' : ''}}">
     <button class="action-btn discard" bindtap="onDiscard">放弃</button>
     <button class="action-btn edit" bindtap="onEdit">修改</button>
-    <button class="action-btn confirm" bindtap="onConfirm">{{card.needsClarification ? '仍然保存' : '确认保存'}}</button>
+    <button wx:if="{{!card.needsClarification}}" class="action-btn confirm" bindtap="onConfirm">确认保存</button>
   </view>
 </view>

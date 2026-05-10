@@ -365,7 +365,13 @@ class PendingActionService:
 
     def _ensure_confirmable(self, action: AgentPendingAction) -> None:
         self._expire_action_if_needed(action)
-        if action.status not in {NEEDS_CLARIFICATION, CONFIRMABLE_PENDING_ACTION_STATUS}:
+        if action.status == NEEDS_CLARIFICATION:
+            raise AppError(
+                "PENDING_ACTION_NEEDS_CLARIFICATION",
+                "这条候选记录仍需补充信息，暂不能保存",
+                status_code=422,
+            )
+        if action.status != CONFIRMABLE_PENDING_ACTION_STATUS:
             raise AppError("VALIDATION_ERROR", "待确认动作已处理，不能再次确认", status_code=422)
 
     def _expire_action_if_needed(self, action: AgentPendingAction) -> None:

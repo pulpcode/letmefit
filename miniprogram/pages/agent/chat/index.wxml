@@ -72,7 +72,7 @@
                 <t-icon name="check" size="22rpx" color="#06a77d" />
               </view>
             </view>
-            <text class="vision-text">{{item.text}}</text>
+            <text wx:if="{{item.text}}" class="vision-text">{{item.text}}</text>
           </view>
         </view>
         <view wx:elif="{{item.kind === 'pending_action'}}" class="pending-wrap">

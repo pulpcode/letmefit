@@ -44,6 +44,21 @@ class FakeImageProvider:
         )
 
 
+class StreamingImageProvider:
+    provider_name = "streaming_vision"
+
+    def describe(self, media: MediaInput) -> ImageUnderstandingResult:
+        raise AssertionError("streaming normalizer should use describe_stream")
+
+    def describe_stream(self, media: MediaInput):
+        yield "我看到米饭、"
+        yield "鸡胸肉和青菜。"
+        return ImageUnderstandingResult(
+            description="我看到米饭、鸡胸肉和青菜。",
+            provider=self.provider_name,
+        )
+
+
 def _file(
     file_id: str,
     mime_type: str,
@@ -126,6 +141,29 @@ def test_input_normalizer_adds_image_description_text() -> None:
     media_context = result.context["media"][0]
     assert media_context["status"] == "described"
     assert media_context["server_accessible"] is True
+
+
+def test_input_normalizer_streams_image_description_text() -> None:
+    normalizer = _normalizer(image_provider=StreamingImageProvider())
+
+    stream = normalizer.normalize_with_vision_stream(
+        [MessageContentItem(type="image", file_id="file_image", source="camera")],
+        {"file_image": _file("file_image", "image/jpeg", storage_provider="local_server")},
+    )
+    events = []
+    try:
+        while True:
+            events.append(next(stream))
+    except StopIteration as stop:
+        result = stop.value
+
+    assert [event[1]["text"] for event in events] == ["我看到米饭、", "鸡胸肉和青菜。"]
+    assert result.content[-1].type == "text"
+    assert result.content[-1].source == "vision"
+    assert result.content[-1].text == "图片理解: 我看到米饭、鸡胸肉和青菜。"
+    media_context = result.context["media"][0]
+    assert media_context["status"] == "described"
+    assert media_context["provider"] == "streaming_vision"
 
 
 def test_input_normalizer_mock_provider_records_unprocessed_media() -> None:
@@ -261,19 +299,37 @@ class _FakeCompletion:
         self.choices = [_FakeChoice(content)]
 
 
-class FakeOpenAIChatCompletions:
+class _FakeStreamDelta:
     def __init__(self, content: str) -> None:
         self.content = content
+
+
+class _FakeStreamChoice:
+    def __init__(self, content: str) -> None:
+        self.delta = _FakeStreamDelta(content)
+
+
+class _FakeStreamChunk:
+    def __init__(self, content: str) -> None:
+        self.choices = [_FakeStreamChoice(content)]
+
+
+class FakeOpenAIChatCompletions:
+    def __init__(self, content: str, stream_chunks: list[str] | None = None) -> None:
+        self.content = content
+        self.stream_chunks = stream_chunks
         self.last_kwargs: dict | None = None
 
     def create(self, **kwargs):
         self.last_kwargs = kwargs
+        if kwargs.get("stream"):
+            return [_FakeStreamChunk(item) for item in self.stream_chunks or []]
         return _FakeCompletion(self.content)
 
 
 class FakeOpenAIClient:
-    def __init__(self, content: str) -> None:
-        completions = FakeOpenAIChatCompletions(content)
+    def __init__(self, content: str, stream_chunks: list[str] | None = None) -> None:
+        completions = FakeOpenAIChatCompletions(content, stream_chunks)
         self.chat = type("Chat", (), {"completions": completions})()
         self._completions = completions
 
@@ -334,6 +390,34 @@ def test_dashscope_vision_provider_formats_structured_description() -> None:
     assert sent["response_format"] == {"type": "json_object"}
     user_msg = sent["messages"][1]
     assert user_msg["content"][0]["image_url"]["url"].startswith("https://media.example/")
+
+
+def test_dashscope_vision_provider_streams_concrete_description() -> None:
+    fake_client = FakeOpenAIClient(
+        content="{}",
+        stream_chunks=["我看到一份米饭、", "鸡胸肉和青菜，份量需要确认。"],
+    )
+    provider = DashScopeVisionUnderstandingProvider(
+        settings=_vision_settings(),
+        client=fake_client,
+    )
+
+    stream = provider.describe_stream(_image_media())
+    chunks = []
+    try:
+        while True:
+            chunks.append(next(stream))
+    except StopIteration as stop:
+        result = stop.value
+
+    assert chunks == ["我看到一份米饭、", "鸡胸肉和青菜，份量需要确认。"]
+    assert result.description == "我看到一份米饭、鸡胸肉和青菜，份量需要确认。"
+    sent = fake_client._completions.last_kwargs
+    assert sent["stream"] is True
+    assert "response_format" not in sent
+    assert sent["messages"][1]["content"][0]["image_url"]["url"].startswith(
+        "https://media.example/"
+    )
 
 
 def test_dashscope_vision_provider_warns_on_invalid_json() -> None:

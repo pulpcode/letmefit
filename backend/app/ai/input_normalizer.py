@@ -1,5 +1,6 @@
 import json
 import time
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.error import URLError
@@ -312,10 +313,21 @@ VISION_SYSTEM_PROMPT = (
     "}\n"
     "规则：\n"
     "- 只识别图中真实可见的食物，不要凭空补全。\n"
-    "- portion_hint 用自然语言（如 \"约一中份\"、\"占盘子 2/3\"），结合参照物（碗/盘/筷子/手）描述。\n"
+    "- portion_hint 用自然语言（如 \"约一中份\"、\"占盘子 2/3\"），"
+    "结合参照物（碗/盘/筷子/手）描述。\n"
     "- estimated_grams 和 estimated_grams_range 是整数克；若无足够信息可填 null。\n"
     "- confidence 表示该 item 的整体识别+份量置信度。\n"
     "- 不能识别食物或图片明显不含食物时，items 留空，并在 warnings 说明原因。\n"
+)
+
+VISION_STREAM_SYSTEM_PROMPT = (
+    "你是一名图像识别助手，专门识别中餐和日常饮食照片中的食物。"
+    "请直接输出可展示给用户的图片理解内容，不要描述你正在分析，不要输出 Markdown。"
+    "内容要求：\n"
+    "- 只描述图中真实可见或高度可能的食物，不要凭空补全。\n"
+    "- 按自然语言说明食物名称、可见份量线索、粗略克重或份量范围。\n"
+    "- 明确哪些内容不确定，提醒用户稍后可在确认卡中修改。\n"
+    "- 语气简洁，适合边生成边显示在聊天气泡中。"
 )
 
 
@@ -405,11 +417,76 @@ class DashScopeVisionUnderstandingProvider:
             warnings=warnings,
         )
 
+    def describe_stream(
+        self,
+        media: MediaInput,
+    ) -> Generator[str, None, ImageUnderstandingResult]:
+        if self._missing_key:
+            return self._warning_result(media, "vision_api_key_missing")
+
+        image_url = self._media_url(media)
+        if not image_url:
+            return self._warning_result(media, "vision_requires_public_or_oss_url")
+
+        chunks: list[str] = []
+        try:
+            stream = self._client.chat.completions.create(  # type: ignore[union-attr]
+                model=self.settings.vision_model,
+                messages=[
+                    {"role": "system", "content": VISION_STREAM_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                            {
+                                "type": "text",
+                                "text": "请直接输出图片中可见食物、份量线索和不确定点。",
+                            },
+                        ],
+                    },
+                ],
+                stream=True,
+                temperature=0.1,
+                max_tokens=self.settings.vision_max_tokens,
+            )
+            for chunk in stream:
+                text = self._stream_chunk_text(chunk)
+                if not text:
+                    continue
+                chunks.append(text)
+                yield text
+        except OpenAIError as exc:
+            return self._warning_result(
+                media,
+                "vision_provider_error",
+                error=f"{exc.__class__.__name__}: {exc}",
+            )
+
+        description = "".join(chunks).strip()
+        if not description:
+            return self._warning_result(media, "vision_empty_response")
+
+        return ImageUnderstandingResult(
+            description=description,
+            provider=self.provider_name,
+        )
+
     def _media_url(self, media: MediaInput) -> str | None:
         for value in (media.object_key, media.client_local_ref):
             if isinstance(value, str) and value.startswith(("http://", "https://", "oss://")):
                 return value
         return None
+
+    def _stream_chunk_text(self, chunk: Any) -> str | None:
+        choices = getattr(chunk, "choices", None)
+        if not choices:
+            return None
+        delta = getattr(choices[0], "delta", None)
+        if isinstance(delta, dict):
+            content = delta.get("content")
+        else:
+            content = getattr(delta, "content", None)
+        return content if isinstance(content, str) and content else None
 
     def _format_description(self, parsed: dict[str, Any]) -> str | None:
         items = parsed.get("items")
@@ -437,7 +514,10 @@ class DashScopeVisionUnderstandingProvider:
                     and len(grams_range) == 2
                     and all(isinstance(v, (int, float)) for v in grams_range)
                 ):
-                    segments.append(f"约 {int(grams)}g（区间 {int(grams_range[0])}-{int(grams_range[1])}g）")
+                    segments.append(
+                        f"约 {int(grams)}g"
+                        f"（区间 {int(grams_range[0])}-{int(grams_range[1])}g）"
+                    )
                 else:
                     segments.append(f"约 {int(grams)}g")
             if isinstance(confidence, (int, float)):
@@ -569,6 +649,109 @@ class InputNormalizer:
                 "vision_provider": self.image_provider.provider_name,
                 "media": normalized_media,
             },
+        )
+
+    def normalize_with_vision_stream(
+        self,
+        content: list[MessageContentItem],
+        files_by_id: dict[str, UploadFile],
+    ) -> Generator[tuple[str, dict[str, Any]], None, NormalizedInput]:
+        normalized_content = list(content)
+        normalized_media = []
+        prefetched_asr_transcript = self._prefetched_asr_transcript(content)
+
+        for item in content:
+            if item.type == "text":
+                continue
+            if not item.file_id:
+                continue
+            file = files_by_id.get(item.file_id)
+            if not file:
+                continue
+
+            media = self._media_input(item, file)
+            if item.type == "audio":
+                result = (
+                    SpeechToTextResult(
+                        transcript=prefetched_asr_transcript,
+                        provider="client_prefetched_asr",
+                    )
+                    if prefetched_asr_transcript
+                    else self.speech_provider.transcribe(media)
+                )
+                normalized_media.append(self._audio_context(media, result))
+                if result.transcript and not prefetched_asr_transcript:
+                    normalized_content.append(
+                        MessageContentItem(
+                            type="text",
+                            text=f"语音转写: {result.transcript}",
+                            source="asr",
+                        )
+                    )
+            elif item.type == "image":
+                result = yield from self._stream_image_result(media)
+                normalized_media.append(self._image_context(media, result))
+                if result.description:
+                    normalized_content.append(
+                        MessageContentItem(
+                            type="text",
+                            text=f"图片理解: {result.description}",
+                            source="vision",
+                        )
+                    )
+
+        return NormalizedInput(
+            content=normalized_content,
+            context={
+                "asr_provider": self.speech_provider.provider_name,
+                "vision_provider": self.image_provider.provider_name,
+                "media": normalized_media,
+            },
+        )
+
+    def _stream_image_result(
+        self,
+        media: MediaInput,
+    ) -> Generator[tuple[str, dict[str, Any]], None, ImageUnderstandingResult]:
+        stream = getattr(self.image_provider, "describe_stream", None)
+        if not callable(stream):
+            result = self.image_provider.describe(media)
+            if result.description:
+                yield (
+                    "delta",
+                    {
+                        "type": "vision",
+                        "stage": "image_understanding",
+                        "text": result.description,
+                    },
+                )
+            return result
+
+        chunks: list[str] = []
+        provider_stream = stream(media)
+        try:
+            while True:
+                chunk = next(provider_stream)
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                yield (
+                    "delta",
+                    {
+                        "type": "vision",
+                        "stage": "image_understanding",
+                        "text": chunk,
+                    },
+                )
+        except StopIteration as stop:
+            result = stop.value
+
+        if isinstance(result, ImageUnderstandingResult):
+            return result
+
+        return ImageUnderstandingResult(
+            description="".join(chunks).strip() or None,
+            provider=self.image_provider.provider_name,
         )
 
     def _prefetched_asr_transcript(self, content: list[MessageContentItem]) -> str | None:

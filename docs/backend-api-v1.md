@@ -810,16 +810,16 @@ ASR 第一版支持 `dashscope_recording`，即百炼/DashScope Paraformer 录�
 
 ### POST /conversations/{conversation_id}/messages/stream
 
-发送消息并以 SSE 返回过程增量。普通 JSON 接口仍是兼容 fallback；流式内容只用于展示识别/推理过程，正式餐食或身体指标记录仍必须通过 `pending_action` 确认后写入。
+发送消息并以 SSE 返回增量内容。普通 JSON 接口仍是兼容 fallback；流式内容只用于展示图片理解和回复生成结果，正式餐食或身体指标记录仍必须通过 `pending_action` 确认后写入。
 
 图片消息的事件顺序：
 
 ```text
 event: delta
-data: {"type":"vision_status","stage":"image_understanding","text":"正在读取图片内容"}
+data: {"type":"vision","stage":"image_understanding","text":"我看到画面里有米饭、鸡胸肉"}
 
 event: delta
-data: {"type":"vision","stage":"image_understanding","text":"场景：餐盘中..."}
+data: {"type":"vision","stage":"image_understanding","text":"和青菜，份量需要你稍后确认。"}
 
 event: delta
 data: {"type":"text","text":"我整理出"}
@@ -828,7 +828,7 @@ event: done
 data: {"message_id":"msg_...","pending_actions":[...]}
 ```
 
-`type=vision` 的内容来自 `InputNormalizer` 的图片理解结果，会在 Agent 继续处理前先发给客户端。客户端应把它展示为待确认卡之前的过程信息，不得直接保存为正式记录。
+`type=vision` 的内容来自 `InputNormalizer` 调用图片理解模型时的真实流式输出，会在 Agent 继续处理前先发给客户端。客户端应把它展示为待确认卡之前的具体图片理解内容，不得直接保存为正式记录。
 
 ### GET /conversations/{conversation_id}/messages
 

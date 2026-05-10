@@ -220,7 +220,7 @@ loop_limit_reached
 ]
 ```
 
-实时展示过程使用 `POST /conversations/{id}/messages/stream`，返回 SSE-like event stream。当前普通 JSON 接口继续作为兼容 fallback。图片输入会先流式返回 `type=vision_status` / `type=vision` 的图片理解内容，随后再返回 assistant 文本和最终 `done` 数据；这些过程事件只能用于前端展示，不能绕过 pending action 确认直接写正式记录。
+实时展示使用 `POST /conversations/{id}/messages/stream`，返回 SSE-like event stream。当前普通 JSON 接口继续作为兼容 fallback。图片输入会先流式返回 `type=vision` 的具体图片理解内容，随后再返回 assistant 文本和最终 `done` 数据；这些事件只能用于前端展示，不能绕过 pending action 确认直接写正式记录。
 
 ## Pending Action Observation
 

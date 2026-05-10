@@ -10,12 +10,6 @@ const VOICE_MAX_SECONDS = 20;
 const VOICE_MIN_DURATION_MS = 800;
 const VOICE_MIN_BYTES = 4 * 1024;
 const VOICE_TICK_MS = 200;
-const VISION_PROGRESS_STEPS = [
-  "正在读取图片内容",
-  "检查画面里的食物、餐具和份量线索",
-  "整理可见食物与置信度",
-  "准备生成待确认记录"
-];
 
 type ChatItem =
   | {
@@ -120,9 +114,6 @@ function stripVisionPrefix(text: string): string {
 }
 
 function formatVisionDelta(delta: StreamDelta): string {
-  if (delta.type === "vision_status" || delta.type === "progress") {
-    return String(delta.text || delta.message || "");
-  }
   if (
     delta.type === "vision" ||
     delta.type === "vision_delta" ||
@@ -364,7 +355,7 @@ Page({
         initialItems.push({
           kind: "vision_reasoning",
           id: visionStreamId,
-          text: VISION_PROGRESS_STEPS[0],
+          text: "",
           stage: "正在理解图片",
           streaming: true,
           createdAt: now
@@ -387,15 +378,6 @@ Page({
       let pendingText = "";
       let visionTextBuffer = "";
       let flushTimer: ReturnType<typeof setTimeout> | null = null;
-      let visionProgressIndex = 0;
-      let visionProgressTimer: ReturnType<typeof setInterval> | null = null;
-
-      const clearVisionProgress = () => {
-        if (visionProgressTimer) {
-          clearInterval(visionProgressTimer);
-          visionProgressTimer = null;
-        }
-      };
 
       const setVisionText = (text: string, streaming = true) => {
         if (!visionStreamId || !text.trim()) return;
@@ -413,17 +395,6 @@ Page({
         });
         this.scrollToBottom();
       };
-
-      if (hasImageInput && visionStreamId) {
-        visionProgressTimer = setInterval(() => {
-          if (visionTextBuffer) return;
-          visionProgressIndex = Math.min(
-            visionProgressIndex + 1,
-            VISION_PROGRESS_STEPS.length - 1
-          );
-          setVisionText(VISION_PROGRESS_STEPS.slice(0, visionProgressIndex + 1).join("\n"));
-        }, 900);
-      }
 
       const flushText = () => {
         if (!pendingText) return;
@@ -458,11 +429,6 @@ Page({
           if (hasImageInput) {
             const visionDelta = formatVisionDelta(delta);
             if (visionDelta) {
-              if (delta.type === "vision_status" || delta.type === "progress") {
-                if (!visionTextBuffer) setVisionText(visionDelta);
-                return;
-              }
-              clearVisionProgress();
               visionTextBuffer += visionDelta;
               setVisionText(visionTextBuffer);
               return;
@@ -480,7 +446,6 @@ Page({
         },
         (data) => {
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-          clearVisionProgress();
           flushText();
           const responseNow = new Date().toISOString();
           let nextItems = this.data.chatItems.filter(
@@ -559,7 +524,6 @@ Page({
         },
         (error) => {
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-          clearVisionProgress();
           this._removeChatItems([streamingId, visionStreamId]);
           this.setData({ sending: false, streamingActive: false });
           showApiError(error);
@@ -567,7 +531,6 @@ Page({
         () => {
           // SSE 未送达（微信 enableChunked 下 onChunkReceived 未触发），从服务端拉取最新结果
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-          clearVisionProgress();
           this._removeChatItems([streamingId, visionStreamId]);
           this.setData({ sending: false, streamingActive: false });
           this.refreshConversation(conversationId);

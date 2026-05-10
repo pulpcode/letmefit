@@ -1,5 +1,5 @@
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -108,32 +108,15 @@ class ConversationService:
         conversation_id: str,
         payload: MessageCreateRequest,
     ) -> Iterator[tuple[str, dict[str, Any]]]:
-        has_image = any(item.type == "image" for item in payload.content)
         yield ("delta", {"type": "thinking", "stage": "received"})
-        if has_image:
-            yield (
-                "delta",
-                {
-                    "type": "vision_status",
-                    "stage": "image_understanding",
-                    "text": "正在读取图片内容",
-                },
-            )
 
         conversation, user_message, normalized_input, context, extraction_input = (
-            self._prepare_user_message(user_id, conversation_id, payload)
+            yield from self._prepare_user_message_with_vision_stream(
+                user_id,
+                conversation_id,
+                payload,
+            )
         )
-        for description in self._vision_descriptions(normalized_input):
-            for chunk in self._text_chunks(description, size=12):
-                yield (
-                    "delta",
-                    {
-                        "type": "vision",
-                        "stage": "image_understanding",
-                        "text": chunk,
-                    },
-                )
-                time.sleep(0.025)
 
         extraction_result = self.agent_runtime.run(
             user_id=user_id,
@@ -183,6 +166,54 @@ class ConversationService:
         self.db.flush()
         media_files = self._add_message_attachments(user_id, user_message.id, payload.content)
         normalized_input = self.input_normalizer.normalize(payload.content, media_files)
+        user_message.content_json = [
+            item.model_dump(mode="json", exclude_none=True) for item in normalized_input.content
+        ]
+        context = self.context_builder.build(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            exclude_message_id=user_message.id,
+        )
+        context["input_normalization"] = normalized_input.context
+
+        extraction_input = ExtractionInput(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            message_id=user_message.id,
+            content=normalized_input.content,
+            context=context,
+        )
+        return conversation, user_message, normalized_input, context, extraction_input
+
+    def _prepare_user_message_with_vision_stream(
+        self,
+        user_id: str,
+        conversation_id: str,
+        payload: MessageCreateRequest,
+    ) -> Generator[
+        tuple[str, dict[str, Any]],
+        None,
+        tuple[Conversation, ConversationMessage, NormalizedInput, dict[str, Any], ExtractionInput],
+    ]:
+        conversation = self._get_owned_conversation(user_id, conversation_id)
+        content = [item.model_dump(mode="json", exclude_none=True) for item in payload.content]
+        user_message = ConversationMessage(
+            id=new_id("msg"),
+            conversation_id=conversation.id,
+            user_id=user_id,
+            role="user",
+            content_json=content,
+            intent=None,
+            requires_review=False,
+            created_at=utc_now(),
+        )
+        self.db.add(user_message)
+        self.db.flush()
+        media_files = self._add_message_attachments(user_id, user_message.id, payload.content)
+        normalized_input = yield from self.input_normalizer.normalize_with_vision_stream(
+            payload.content,
+            media_files,
+        )
         user_message.content_json = [
             item.model_dump(mode="json", exclude_none=True) for item in normalized_input.content
         ]

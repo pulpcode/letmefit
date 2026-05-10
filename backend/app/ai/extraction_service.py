@@ -152,6 +152,12 @@ class ExtractionService:
                 draft_payload,
                 warnings=warnings,
             )
+            if status == NEEDS_CLARIFICATION:
+                missing = self._describe_missing_fields(action_spec.action_type, draft_payload)
+                tool_results.append(
+                    self._tool_result(tool_call, "rejected", reason=f"insufficient_data:{missing}")
+                )
+                continue
             action = self._create_pending_action(
                 user_id=user_id,
                 conversation_id=conversation_id,
@@ -637,12 +643,22 @@ class ExtractionService:
             }
         ]
 
+    def _describe_missing_fields(self, action_type: str, draft_payload: dict) -> str:
+        if action_type == "create_meal_record":
+            items = draft_payload.get("items") or []
+            for item in items:
+                if not item.get("portion_grams") and not item.get("portion_text"):
+                    return "meal_portion"
+            return "meal_data"
+        if action_type == "create_body_metric_record":
+            return "body_metric_value"
+        if action_type == "create_workout_record":
+            if not (draft_payload.get("workout_type") or draft_payload.get("name")):
+                return "workout_name"
+            return "workout_duration"
+        return "required_fields"
+
     def _pending_actions_text(self, pending_actions: list[dict]) -> str:
-        if any(action.get("status") == "needs_clarification" for action in pending_actions):
-            return (
-                "我整理出一条候选记录，但还有关键信息需要补充，"
-                "请先补充或修改后再保存。"
-            )
         if len(pending_actions) == 1:
             action_type = pending_actions[0].get("type")
             if action_type == "create_meal_record":

@@ -119,7 +119,7 @@ def _workout_status(draft_payload: dict[str, Any]) -> str:
 
 
 def _meal_item_has_clear_portion(item: dict[str, Any]) -> bool:
-    return item.get("portion_grams") is not None
+    return item.get("portion_grams") is not None or bool(item.get("portion_text"))
 
 
 def _needs_clarification_warning(warnings: list[dict[str, Any]]) -> bool:

@@ -136,7 +136,7 @@ function buildChatItems(messages: ParsedMessage[], pendingActions: PendingAction
     }
   }
   for (const pa of pendingActions) {
-    if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+    if (pa.status === "pending_confirmation") {
       items.push({ kind: "pending_action", id: pa.pending_action_id, action: pa, createdAt: pa.created_at || "" });
     }
   }
@@ -382,7 +382,7 @@ Page({
               .map(i => [i.id, i as ChatItem])
           );
           for (const pa of data.pending_actions || []) {
-            if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+            if (pa.status === "pending_confirmation") {
               if (existingPendingMap.has(pa.pending_action_id)) {
                 const oldIdx = nextItems.findIndex(
                   i => i.id === pa.pending_action_id && i.kind === "pending_action"
@@ -679,7 +679,7 @@ Page({
               .map(i => [i.id, i as ChatItem])
           );
           for (const pa of data.pending_actions || []) {
-            if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+            if (pa.status === "pending_confirmation") {
               if (existingPendingMap.has(pa.pending_action_id)) {
                 const oldIdx = nextItems.findIndex(
                   i => i.id === pa.pending_action_id && i.kind === "pending_action"
@@ -846,7 +846,7 @@ Page({
     listPendingActions(conversationId)
       .then(pendingData => {
         const active = (pendingData.pending_actions || []).filter(
-          pa => pa.status === "pending_confirmation" || pa.status === "needs_clarification"
+          pa => pa.status === "pending_confirmation"
         );
         const freshById = new Map(active.map(pa => [pa.pending_action_id, pa]));
         const now = new Date().toISOString();
@@ -937,7 +937,7 @@ Page({
       })
     ];
     for (const pa of continuation.pending_actions || []) {
-      if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
+      if (pa.status === "pending_confirmation") {
         result.push({ kind: "pending_action", id: pa.pending_action_id, action: pa, createdAt: pa.created_at || now });
       }
     }

@@ -32,10 +32,7 @@ Component({
       const payload = action.draft_payload || {};
       const warnings = action.warnings || [];
       const warningFields = warnings.map((item: any) => item.field).filter(Boolean);
-      const needsClarification = action.status === "needs_clarification";
-      const warningText = needsClarification
-        ? "这条草稿还缺少关键信息，请补充后再保存"
-        : "部分字段为估算值，确认前可修改";
+      const warningText = "部分字段为估算值，确认前可修改";
 
       if (action.type === "create_meal_record") {
         const items = (payload.items || []).map((item: any) => ({
@@ -64,7 +61,6 @@ Component({
             ],
             hasWarnings: warningFields.length > 0 || (action.confidence || 1) < 0.8,
             warningText,
-            needsClarification
           }
         });
         return;
@@ -83,7 +79,6 @@ Component({
             ],
             hasWarnings: warningFields.length > 0 || (action.confidence || 1) < 0.8,
             warningText,
-            needsClarification
           }
         });
         return;
@@ -101,8 +96,7 @@ Component({
               { label: "消耗", value: numberText(payload.calories_burned, " kcal") }
             ],
             hasWarnings: true,
-            warningText: needsClarification ? warningText : "锻炼记录功能正在完善，确认前请检查字段",
-            needsClarification
+            warningText: "锻炼记录功能正在完善，确认前请检查字段",
           }
         });
         return;
@@ -114,7 +108,6 @@ Component({
           title: "待确认动作",
           hasWarnings: warningFields.length > 0,
           warningText,
-          needsClarification
         }
       });
     },

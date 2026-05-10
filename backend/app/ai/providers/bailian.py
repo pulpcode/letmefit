@@ -83,8 +83,9 @@ SYSTEM_PROMPT = """
 - confirmed_record 只用于回答和总结，不能创建新记录。
 - model_inference 不能写记录，但可以 propose_*（由用户通过界面确认）；
   信息不足时应 assistant_text 追问用户，tool_calls=[]。
-- 信息不足但可以通过用户补充解决时，不要猜测；assistant_text 只提一个清晰追问，
-  tool_calls=[]，并在 warnings 中加入 {"field": "agent_decision", "reason": "needs_clarification"}。
+- 信息不足但可以通过用户补充解决时，不要猜测；assistant_text 只提一个清晰追问，tool_calls=[]。
+- 如果 propose_* 工具返回 status=rejected 且 reason 包含 insufficient_data，
+  说明后端检测到必要字段缺失，必须在 assistant_text 中向用户追问具体缺少的信息，不要重试工具调用。
 - grounding.evidence_text 必须是对应来源中的原文或可验证片段，不能改写。
 - 兼容旧字段时，user_current_turn 等同 current_user_message；
   assistant_generated 等同 assistant_plan。

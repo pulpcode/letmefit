@@ -203,8 +203,7 @@ class AgentRuntime:
                         "pending_action_ids": [
                             result.get("pending_action_id")
                             for result in new_tool_results
-                            if result.get("status")
-                            in {"pending_confirmation", "needs_clarification"}
+                            if result.get("status") == "pending_confirmation"
                         ],
                     }
                 )
@@ -358,7 +357,7 @@ class AgentRuntime:
 
     def _requires_human_confirmation(self, tool_results: list[dict[str, Any]]) -> bool:
         return any(
-            result.get("status") in {"pending_confirmation", "needs_clarification"}
+            result.get("status") == "pending_confirmation"
             and result.get("tool_name") in RECORD_TOOL_NAMES
             for result in tool_results
         )

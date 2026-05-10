@@ -23,6 +23,7 @@ from app.schemas.pending_action import decimal_to_float
 from app.services.body_metrics import BodyMetricService
 from app.services.meals import MealService
 from app.services.pending_action_lifecycle import (
+    NEEDS_CLARIFICATION,
     PENDING_CONFIRMATION,
     classify_pending_action_status,
     normalize_status_warnings,

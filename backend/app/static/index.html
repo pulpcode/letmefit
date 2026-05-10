@@ -613,6 +613,11 @@
               <pre id="llmRequestOutput"></pre>
             </div>
             <div class="state copyable">
+              <span>LLM Tool Calls</span>
+              <button class="copy-btn secondary" data-target="llmToolCallsOutput">复制</button>
+              <pre id="llmToolCallsOutput"></pre>
+            </div>
+            <div class="state copyable">
               <span>Agent Trace</span>
               <button class="copy-btn secondary" data-target="agentTraceOutput">复制</button>
               <pre id="agentTraceOutput"></pre>
@@ -1090,6 +1095,7 @@
         pre.classList.remove("error");
         pre.textContent = JSON.stringify(withoutDebugContext(value), null, 2);
         $("llmRequestOutput").textContent = JSON.stringify(extractLlmRequestBody(value), null, 2);
+        $("llmToolCallsOutput").textContent = JSON.stringify(extractLlmToolCalls(value), null, 2);
         $("agentTraceOutput").textContent = JSON.stringify(extractAgentTrace(value), null, 2);
       }
 
@@ -1098,6 +1104,7 @@
         pre.classList.add("error");
         pre.textContent = JSON.stringify(error, null, 2);
         $("llmRequestOutput").textContent = "";
+        $("llmToolCallsOutput").textContent = "";
         $("agentTraceOutput").textContent = "";
       }
 
@@ -1129,6 +1136,41 @@
         }
         for (const item of Object.values(value)) {
           const found = findLlmRequestBody(item);
+          if (found) {
+            return found;
+          }
+        }
+        return null;
+      }
+
+      function extractLlmToolCalls(value) {
+        const toolCalls = findLlmToolCalls(value);
+        if (toolCalls) {
+          return toolCalls;
+        }
+        return {
+          note: '本次响应没有 debug_context.llm_tool_calls。发送消息并勾选"显示 LLM 上下文"后会显示。',
+        };
+      }
+
+      function findLlmToolCalls(value) {
+        if (!value || typeof value !== "object") {
+          return null;
+        }
+        if (Array.isArray(value.debug_context?.llm_tool_calls)) {
+          return value.debug_context.llm_tool_calls;
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const found = findLlmToolCalls(item);
+            if (found) {
+              return found;
+            }
+          }
+          return null;
+        }
+        for (const item of Object.values(value)) {
+          const found = findLlmToolCalls(item);
           if (found) {
             return found;
           }
@@ -1187,6 +1229,29 @@
 
       function apiBase() {
         return $("apiBase").value.replace(/\/$/, "");
+      }
+
+      function parseSseBlock(block) {
+        let event = "message";
+        const dataLines = [];
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+        }
+        if (!dataLines.length) return null;
+        return { event, data: dataLines.join("\n") };
+      }
+
+      function renderImmediatePendingActions(actions) {
+        const active = (actions || []).filter((action) =>
+          ["pending_confirmation", "needs_clarification"].includes(action.status),
+        );
+        if (!active.length) {
+          return;
+        }
+        renderPendingActions(active);
+        savePendingActionId(active[0].pending_action_id);
+        $("pendingCards").parentElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }
 
       async function api(path, options = {}) {
@@ -1398,42 +1463,50 @@
           const decoder = new TextDecoder();
           let buf = "";
           let finalData = null;
+          const handleSseEvent = (block) => {
+            const eventData = parseSseBlock(block);
+            if (!eventData) return;
+            try {
+              const parsed = JSON.parse(eventData.data);
+              if (eventData.event === "delta" && parsed.type === "text" && parsed.text) {
+                streamTextEl.textContent += parsed.text;
+                list.scrollTop = list.scrollHeight;
+              } else if (eventData.event === "done") {
+                finalData = parsed;
+              } else if (eventData.event === "error") {
+                logError(parsed);
+              }
+            } catch (_) {}
+          };
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            buf += decoder.decode(value, { stream: true });
+            buf = (buf + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
             const blocks = buf.split("\n\n");
             buf = blocks.pop() ?? "";
             for (const block of blocks) {
-              let event = "message";
-              let data = "";
-              for (const line of block.split("\n")) {
-                if (line.startsWith("event: ")) event = line.slice(7).trim();
-                else if (line.startsWith("data: ")) data = line.slice(6).trim();
-              }
-              if (!data) continue;
-              try {
-                const parsed = JSON.parse(data);
-                if (event === "delta" && parsed.type === "text" && parsed.text) {
-                  streamTextEl.textContent += parsed.text;
-                  list.scrollTop = list.scrollHeight;
-                } else if (event === "done") {
-                  finalData = parsed;
-                } else if (event === "error") {
-                  logError(parsed);
-                }
-              } catch (_) {}
+              handleSseEvent(block);
             }
+          }
+          buf = (buf + decoder.decode()).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+          if (buf.trim()) {
+            handleSseEvent(buf);
           }
           if (finalData) {
             const wrapped = { data: finalData };
             log(wrapped);
             cacheDebugTurn(wrapped, userText);
             $("summaryPill").style.display = finalData.summary_pending ? "" : "none";
-            const action = finalData.pending_actions?.[0];
-            if (action) savePendingActionId(action.pending_action_id);
-            await refreshMessages();
-            await refreshPendingActions(true);
+            renderImmediatePendingActions(finalData.pending_actions);
+            await Promise.allSettled([
+              refreshMessages(),
+              refreshPendingActions(true),
+            ]);
+          } else {
+            await Promise.allSettled([
+              refreshMessages(),
+              refreshPendingActions(true),
+            ]);
           }
         } catch (error) {
           logError(error);
@@ -1490,12 +1563,11 @@
           });
           cacheDebugTurn(response, audioPrompt());
           $("summaryPill").style.display = response.data?.summary_pending ? "" : "none";
-          const action = response.data.pending_actions?.[0];
-          if (action) {
-            savePendingActionId(action.pending_action_id);
-          }
-          await refreshMessages();
-          await refreshPendingActions();
+          renderImmediatePendingActions(response.data?.pending_actions);
+          await Promise.allSettled([
+            refreshMessages(),
+            refreshPendingActions(true),
+          ]);
           return response;
         });
 
@@ -1536,12 +1608,11 @@
             },
           });
           cacheDebugTurn(messageResponse, audioPrompt());
-          const action = messageResponse.data.pending_actions?.[0];
-          if (action) {
-            savePendingActionId(action.pending_action_id);
-          }
-          await refreshMessages();
-          await refreshPendingActions();
+          renderImmediatePendingActions(messageResponse.data?.pending_actions);
+          await Promise.allSettled([
+            refreshMessages(),
+            refreshPendingActions(true),
+          ]);
           return {
             upload: uploadResponse.data.file,
             message: messageResponse.data,

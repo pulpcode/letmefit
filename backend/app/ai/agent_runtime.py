@@ -45,6 +45,7 @@ class AgentRuntime:
         committed_records = []
         # Each entry: {"assistant_output": raw_output_dict, "tool_results": list[dict]}
         prior_turns: list[dict[str, Any]] = []
+        debug_model_outputs: list[dict[str, Any]] = []
         tool_rounds = 0
         total_tool_calls = 0
         provider_result: ExtractionProviderResult | None = None
@@ -61,6 +62,7 @@ class AgentRuntime:
                     prior_turns=prior_turns,
                 )
             )
+            debug_model_outputs.append(self._debug_model_output(provider_result, model_turn))
             trace.append(
                 {
                     "event": "model_decision",
@@ -85,6 +87,7 @@ class AgentRuntime:
                     committed_records=committed_records,
                     prior_turns=prior_turns,
                     trace=trace,
+                    debug_model_outputs=debug_model_outputs,
                 )
 
             # Check tool-level limits before executing (max_model_turns is handled by the for loop)
@@ -108,6 +111,7 @@ class AgentRuntime:
                     committed_records=committed_records,
                     prior_turns=prior_turns,
                     trace=trace,
+                    debug_model_outputs=debug_model_outputs,
                 )
 
             remaining_total_calls = max(
@@ -131,6 +135,7 @@ class AgentRuntime:
                     committed_records=committed_records,
                     prior_turns=prior_turns,
                     trace=trace,
+                    debug_model_outputs=debug_model_outputs,
                 )
 
             tool_calls = provider_result.tool_calls[:executable_count]
@@ -209,6 +214,7 @@ class AgentRuntime:
                     committed_records=committed_records,
                     prior_turns=prior_turns,
                     trace=trace,
+                    debug_model_outputs=debug_model_outputs,
                 )
 
             # Tools executed; if this was the last model turn we cannot call LLM again
@@ -220,6 +226,7 @@ class AgentRuntime:
                     committed_records=committed_records,
                     prior_turns=prior_turns,
                     trace=trace,
+                    debug_model_outputs=debug_model_outputs,
                 )
 
         # Defensive fallback — unreachable for max_model_turns >= 1
@@ -230,6 +237,7 @@ class AgentRuntime:
             committed_records=committed_records,
             prior_turns=prior_turns,
             trace=trace,
+            debug_model_outputs=debug_model_outputs,
         )
 
     def _response(
@@ -240,6 +248,7 @@ class AgentRuntime:
         committed_records: list[dict[str, Any]],
         prior_turns: list[dict[str, Any]],
         trace: list[dict[str, Any]],
+        debug_model_outputs: list[dict[str, Any]],
     ) -> dict[str, Any]:
         tool_results = self._all_tool_results(prior_turns)
         response = self.extraction_service._result_response(
@@ -257,7 +266,46 @@ class AgentRuntime:
             response["assistant_text"] = f'{response["assistant_text"]} {final_text}'
             response["assistant_content"].append({"type": "text", "text": final_text})
         response["agent_trace"] = trace
+        response["debug_model_outputs"] = debug_model_outputs
         return response
+
+    def _debug_model_output(
+        self,
+        provider_result: ExtractionProviderResult,
+        model_turn: int,
+    ) -> dict[str, Any]:
+        return {
+            "model_turn": model_turn,
+            "assistant_text": provider_result.assistant_text,
+            "intent": provider_result.intent,
+            "requires_review": provider_result.requires_review,
+            "confidence": self._debug_decimal(provider_result.confidence),
+            "warnings": provider_result.warnings,
+            "tool_calls": [
+                {
+                    "name": tool_call.name,
+                    "action_type": tool_call.action_type,
+                    "arguments": tool_call.arguments,
+                    "confidence": self._debug_decimal(tool_call.confidence),
+                    "grounding": (
+                        {
+                            "source": tool_call.grounding.source,
+                            "source_id": tool_call.grounding.source_id,
+                            "evidence_text": tool_call.grounding.evidence_text,
+                            "confidence": self._debug_decimal(tool_call.grounding.confidence),
+                        }
+                        if tool_call.grounding
+                        else None
+                    ),
+                    "warnings": tool_call.warnings,
+                }
+                for tool_call in provider_result.tool_calls
+            ],
+            "raw_output": provider_result.raw_output,
+        }
+
+    def _debug_decimal(self, value) -> float | None:
+        return float(value) if value is not None else None
 
     def _should_append_final_text(
         self,

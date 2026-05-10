@@ -219,7 +219,13 @@ def test_agent_runtime_pauses_when_record_tool_requires_human_confirmation() -> 
                             "recorded_at": "2026-05-06T12:30:00+08:00",
                             "source_type": "text",
                             "meal_type": "lunch",
-                            "items": [{"name": "炒面", "portion_text": "300g", "portion_grams": 300}],
+                            "items": [
+                                {
+                                    "name": "炒面",
+                                    "portion_text": "300g",
+                                    "portion_grams": 300,
+                                }
+                            ],
                         },
                         grounding=ActionGrounding(
                             source="current_user_message",
@@ -249,6 +255,11 @@ def test_agent_runtime_pauses_when_record_tool_requires_human_confirmation() -> 
     assert len(provider.payloads) == 1
     assert result["pending_actions"][0]["type"] == "create_meal_record"
     assert result["tool_results"][0]["status"] == "pending_confirmation"
+    assert result["debug_model_outputs"][0]["tool_calls"][0]["name"] == "propose_meal_record"
+    assert result["debug_model_outputs"][0]["tool_calls"][0]["arguments"]["meal_type"] == "lunch"
+    assert result["debug_model_outputs"][0]["tool_calls"][0]["grounding"]["evidence_text"] == (
+        "中午吃了炒面"
+    )
     assert result["agent_trace"][-1]["event"] == "human_confirmation_required"
 
 

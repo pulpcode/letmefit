@@ -117,7 +117,9 @@ class ConversationService:
             context=context,
         )
         debug_context = (
-            self._debug_context(extraction_input) if payload.include_debug_context else None
+            self._debug_context(extraction_input, extraction_result)
+            if payload.include_debug_context
+            else None
         )
         assistant_created_at = utc_now()
         assistant_message = ConversationMessage(
@@ -156,17 +158,36 @@ class ConversationService:
             response["debug_context"] = debug_context
         return response
 
-    def _debug_context(self, extraction_input: ExtractionInput) -> dict[str, Any]:
+    def _debug_context(
+        self,
+        extraction_input: ExtractionInput,
+        extraction_result: dict[str, Any],
+    ) -> dict[str, Any]:
         normalized_content = [
             item.model_dump(mode="json", exclude_none=True) for item in extraction_input.content
         ]
+        llm_model_outputs = extraction_result.get("debug_model_outputs", [])
         return {
             "provider": self.extraction_service.provider.provider_name,
             "normalized_content": normalized_content,
             "conversation_context": extraction_input.context,
             "llm_request_body": self.extraction_service.provider.last_debug_request_body(),
             "llm_user_prompt_payload": build_extraction_user_prompt_payload(extraction_input),
+            "llm_model_outputs": llm_model_outputs,
+            "llm_tool_calls": self._debug_tool_calls(llm_model_outputs),
         }
+
+    def _debug_tool_calls(self, llm_model_outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        tool_calls = []
+        for output in llm_model_outputs:
+            for tool_call in output.get("tool_calls") or []:
+                tool_calls.append(
+                    {
+                        "model_turn": output.get("model_turn"),
+                        **tool_call,
+                    }
+                )
+        return tool_calls
 
     def _add_message_attachments(
         self,

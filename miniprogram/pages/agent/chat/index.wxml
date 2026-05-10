@@ -30,13 +30,46 @@
       <block wx:for="{{chatItems}}" wx:key="id">
         <view wx:if="{{item.kind === 'message'}}" class="message-row {{item.role === 'user' ? 'user' : 'assistant'}}">
           <image wx:if="{{item.role === 'assistant'}}" class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
-          <view class="bubble {{item.role === 'assistant' && !item.text ? 'typing-bubble' : ''}}">
+          <view class="bubble {{item.role === 'assistant' && !item.text ? 'typing-bubble' : ''}} {{item.images && item.images.length ? 'media-bubble' : ''}}">
             <block wx:if="{{item.role === 'assistant' && !item.text}}">
               <view class="typing-dot"></view>
               <view class="typing-dot"></view>
               <view class="typing-dot"></view>
             </block>
-            <text wx:else>{{item.text}}</text>
+            <block wx:else>
+              <view wx:if="{{item.images && item.images.length}}" class="message-images">
+                <image
+                  wx:for="{{item.images}}"
+                  wx:for-item="image"
+                  wx:key="fileId"
+                  class="message-image"
+                  src="{{image.url}}"
+                  mode="aspectFill"
+                  data-src="{{image.url}}"
+                  data-urls="{{item.imageUrls}}"
+                  bindtap="previewChatImage"
+                />
+              </view>
+              <text wx:if="{{item.text}}" class="bubble-text">{{item.text}}</text>
+            </block>
+          </view>
+        </view>
+        <view wx:elif="{{item.kind === 'vision_reasoning'}}" class="message-row assistant vision-reasoning-row">
+          <image class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
+          <view class="vision-reasoning-card">
+            <view class="vision-scan-line"></view>
+            <view class="vision-reasoning-head">
+              <view class="vision-icon-wrap">
+                <t-icon name="image-search" size="28rpx" color="#00b4d8" />
+              </view>
+              <text class="vision-title">图片理解</text>
+              <view class="vision-thinking-dots">
+                <view class="vision-dot"></view>
+                <view class="vision-dot"></view>
+                <view class="vision-dot"></view>
+              </view>
+            </view>
+            <text class="vision-text">{{item.text}}</text>
           </view>
         </view>
         <view wx:elif="{{item.kind === 'pending_action'}}" class="pending-wrap">

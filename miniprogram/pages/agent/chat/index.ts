@@ -11,51 +11,148 @@ const VOICE_MIN_BYTES = 4 * 1024;
 const VOICE_TICK_MS = 200;
 
 type ChatItem =
-  | { kind: "message"; id: string; role: "user" | "assistant"; text: string; createdAt: string }
+  | {
+      kind: "message";
+      id: string;
+      role: "user" | "assistant";
+      text: string;
+      images: ChatImage[];
+      imageUrls: string[];
+      createdAt: string;
+    }
+  | { kind: "vision_reasoning"; id: string; text: string; createdAt: string }
   | { kind: "pending_action"; id: string; action: PendingAction; createdAt: string }
   | { kind: "pending_action_superseded"; id: string; pendingActionId: string; createdAt: string };
+
+type ChatImage = {
+  fileId: string;
+  url: string;
+  source?: string;
+};
 
 interface ParsedMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  images: ChatImage[];
+  visionText: string;
   createdAt: string;
 }
 
-function parseMessage(message: ConversationMessage): string {
+function createMessageItem(input: {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt: string;
+  images?: ChatImage[];
+}): ChatItem {
+  const images = input.images || [];
+  return {
+    kind: "message",
+    id: input.id,
+    role: input.role,
+    text: input.text,
+    images,
+    imageUrls: images.map((image) => image.url).filter(Boolean),
+    createdAt: input.createdAt,
+  };
+}
+
+function parseConversationMessage(message: ConversationMessage): ParsedMessage {
   const parts = message.content || [];
   const texts: string[] = [];
+  const visionTexts: string[] = [];
+  const images: ChatImage[] = [];
 
   for (const part of parts as any[]) {
     if (part.type === "text") {
-      const text = part.source === "asr" ? stripAsrPrefix(part.text) : part.text;
-      texts.push(text);
+      if (part.source === "vision") {
+        visionTexts.push(stripVisionPrefix(part.text));
+      } else {
+        const text = part.source === "asr" ? stripAsrPrefix(part.text) : part.text;
+        texts.push(text);
+      }
     } else if (part.type === "image") {
-      texts.push("📷 图片");
+      if (part.url) {
+        images.push({
+          fileId: part.file_id || "",
+          url: part.url,
+          source: part.source,
+        });
+      } else {
+        texts.push("📷 图片");
+      }
     } else if (part.type === "event") {
       texts.push(part.text || "");
     }
   }
 
-  return texts.join("\n");
+  return {
+    id: message.id,
+    role: message.role,
+    text: texts.filter(Boolean).join("\n"),
+    images,
+    visionText: visionTexts.filter(Boolean).join("\n"),
+    createdAt: message.created_at
+  };
 }
 
 function stripAsrPrefix(text: string): string {
   return (text || "").replace(/^语音转写[:：]\s*/, "");
 }
 
+function stripVisionPrefix(text: string): string {
+  return (text || "").replace(/^图片理解[:：]\s*/, "");
+}
+
+function visionTextFromContent(content?: any[]): string {
+  if (!content) return "";
+  return (content as any[])
+    .filter((part) => part.type === "text" && part.source === "vision")
+    .map((part) => stripVisionPrefix(part.text || ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
 function buildChatItems(messages: ParsedMessage[], pendingActions: PendingAction[]): ChatItem[] {
   const items: ChatItem[] = [];
   for (const msg of messages) {
-    items.push({ kind: "message", id: msg.id, role: msg.role, text: msg.text, createdAt: msg.createdAt });
+    if (msg.text || msg.images.length) {
+      items.push(createMessageItem({
+        id: msg.id,
+        role: msg.role,
+        text: msg.text,
+        images: msg.images,
+        createdAt: msg.createdAt
+      }));
+    }
+    if (msg.visionText) {
+      items.push({
+        kind: "vision_reasoning",
+        id: `${msg.id}_vision`,
+        text: msg.visionText,
+        createdAt: msg.createdAt
+      });
+    }
   }
   for (const pa of pendingActions) {
     if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
       items.push({ kind: "pending_action", id: pa.pending_action_id, action: pa, createdAt: pa.created_at || "" });
     }
   }
-  items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  items.sort((a, b) => {
+    const byTime = a.createdAt.localeCompare(b.createdAt);
+    if (byTime !== 0) return byTime;
+    return chatItemOrder(a) - chatItemOrder(b);
+  });
   return items;
+}
+
+function chatItemOrder(item: ChatItem): number {
+  if (item.kind === "message") return item.role === "user" ? 0 : 2;
+  if (item.kind === "vision_reasoning") return 1;
+  if (item.kind === "pending_action") return 3;
+  return 4;
 }
 
 Page({
@@ -178,13 +275,8 @@ Page({
         listPendingActions(cid)
       ]);
       const messages: ParsedMessage[] = (messageData.messages || [])
-        .map((msg) => ({
-          id: msg.id,
-          role: msg.role,
-          text: parseMessage(msg),
-          createdAt: msg.created_at
-        }))
-        .filter((msg) => msg.text);
+        .map((msg) => parseConversationMessage(msg))
+        .filter((msg) => msg.text || msg.images.length || msg.visionText);
       this.setData({
         chatItems: buildChatItems(messages, pendingData.pending_actions || [])
       });
@@ -205,27 +297,26 @@ Page({
     await this.sendContent([{ type: "text", text }], text);
   },
 
-  sendContent(content: MessagePart[], userPreview: string) {
+  sendContent(content: MessagePart[], userPreview: string, options?: { userImages?: ChatImage[] }) {
     (async () => {
       const conversationId = await this.ensureConversation();
       if (!conversationId) return;
 
       const now = new Date().toISOString();
-      const localUserItem: ChatItem = {
-        kind: "message",
+      const localUserItem = createMessageItem({
         id: `local_user_${Date.now()}`,
         role: "user",
         text: userPreview,
+        images: options?.userImages || [],
         createdAt: now
-      };
+      });
       const streamingId = `streaming_${Date.now()}`;
-      const streamingItem: ChatItem = {
-        kind: "message",
+      const streamingItem = createMessageItem({
         id: streamingId,
         role: "assistant",
         text: "",
         createdAt: now
-      };
+      });
       this.setData({
         sending: true,
         streamingActive: true,
@@ -268,14 +359,22 @@ Page({
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
           const responseNow = new Date().toISOString();
           let nextItems = this.data.chatItems.filter((item) => item.id !== streamingId);
-          if (data.assistant_text) {
+          const visionText = visionTextFromContent(data.normalized_content as any);
+          if (visionText) {
             nextItems.push({
-              kind: "message",
+              kind: "vision_reasoning",
+              id: `${data.message_id}_vision`,
+              text: visionText,
+              createdAt: responseNow
+            });
+          }
+          if (data.assistant_text) {
+            nextItems.push(createMessageItem({
               id: data.assistant_message_id || `local_assistant_${Date.now()}`,
               role: "assistant",
               text: data.assistant_text,
               createdAt: responseNow
-            });
+            }));
           }
           for (const pa of data.pending_actions || []) {
             if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
@@ -321,6 +420,16 @@ Page({
     }
   },
 
+  previewChatImage(event: any) {
+    const current = event.currentTarget?.dataset?.src;
+    const urls = event.currentTarget?.dataset?.urls || [];
+    if (!current) return;
+    wx.previewImage({
+      current,
+      urls: Array.isArray(urls) && urls.length ? urls : [current]
+    });
+  },
+
   async chooseImage(source: "camera" | "album") {
     try {
       const res = await wx.chooseMedia({
@@ -337,7 +446,14 @@ Page({
       });
       await this.sendContent(
         [{ type: "image", file_id: upload.file.id, source }],
-        source === "camera" ? "📷 拍照" : "📷 图片"
+        "",
+        {
+          userImages: [{
+            fileId: upload.file.id,
+            url: file.tempFilePath || upload.file.object_key || "",
+            source
+          }].filter((image) => image.url)
+        }
       );
     } catch (error) {
       if ((error as any)?.errMsg?.includes("cancel")) return;
@@ -441,13 +557,12 @@ Page({
     if (!conversationId) return;
 
     const now = new Date().toISOString();
-    const localUserItem: ChatItem = {
-      kind: "message",
+    const localUserItem = createMessageItem({
       id: `local_user_voice_${Date.now()}`,
       role: "user",
       text: "正在识别...",
       createdAt: now
-    };
+    });
     this.setData({
       sending: true,
       chatItems: [...this.data.chatItems, localUserItem]
@@ -478,13 +593,12 @@ Page({
       const streamingNow = new Date().toISOString();
       this.setData({
         streamingActive: true,
-        chatItems: [...this.data.chatItems, {
-          kind: "message",
+        chatItems: [...this.data.chatItems, createMessageItem({
           id: streamingId,
           role: "assistant",
           text: "",
           createdAt: streamingNow
-        } as ChatItem]
+        })]
       });
       this.scrollToBottom();
 
@@ -523,13 +637,12 @@ Page({
           const responseNow = new Date().toISOString();
           let nextItems = this.data.chatItems.filter((item) => item.id !== streamingId);
           if (data.assistant_text) {
-            nextItems.push({
-              kind: "message",
+            nextItems.push(createMessageItem({
               id: data.assistant_message_id || `local_assistant_${Date.now()}`,
               role: "assistant",
               text: data.assistant_text,
               createdAt: responseNow
-            });
+            }));
           }
           for (const pa of data.pending_actions || []) {
             if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
@@ -574,7 +687,7 @@ Page({
   _updateChatItemText(itemId: string, text: string) {
     this.setData({
       chatItems: this.data.chatItems.map((item) =>
-        item.id === itemId ? { ...item, text } : item
+        item.id === itemId && item.kind === "message" ? { ...item, text } : item
       )
     });
     this.scrollToBottom();
@@ -752,13 +865,12 @@ Page({
     const now = new Date().toISOString();
     const result: ChatItem[] = [
       ...chatItems,
-      {
-        kind: "message",
+      createMessageItem({
         id: continuation.assistant_message_id,
         role: "assistant",
         text: continuation.assistant_text,
         createdAt: now
-      }
+      })
     ];
     for (const pa of continuation.pending_actions || []) {
       if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {

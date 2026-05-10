@@ -124,7 +124,14 @@ export type Conversation = {
 
 export type MessagePart =
   | { type: "text"; text: string; source?: string }
-  | { type: "image"; file_id: string; source?: "camera" | "album" | "upload" }
+  | {
+      type: "image";
+      file_id: string;
+      source?: "camera" | "album" | "upload";
+      url?: string | null;
+      mime_type?: string | null;
+      storage_provider?: string | null;
+    }
   | { type: "audio"; file_id: string; duration_seconds?: number };
 
 export type ConversationMessagePart =
@@ -165,6 +172,7 @@ export type PendingAction = {
 export type SendMessageResponse = {
   message_id: string;
   assistant_message_id?: string;
+  normalized_content?: ConversationMessagePart[];
   assistant_text?: string;
   intent?: string;
   requires_review?: boolean;

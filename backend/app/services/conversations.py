@@ -68,7 +68,13 @@ class ConversationService:
                 .order_by(ConversationMessage.created_at.asc())
             )
         )
-        return {"messages": [self._message_response(message) for message in messages]}
+        attachment_files = self._attachment_files_by_message([message.id for message in messages])
+        return {
+            "messages": [
+                self._message_response(message, attachment_files.get(message.id, {}))
+                for message in messages
+            ]
+        }
 
     def send_message(
         self,
@@ -144,6 +150,7 @@ class ConversationService:
         response = {
             "message_id": user_message.id,
             "assistant_message_id": assistant_message.id,
+            "normalized_content": user_message.content_json,
             "assistant_text": extraction_result["assistant_text"],
             "intent": extraction_result["intent"],
             "requires_review": extraction_result["requires_review"],
@@ -230,6 +237,41 @@ class ConversationService:
             )
         return {file.id: file for file in files}
 
+    def _attachment_files_by_message(
+        self,
+        message_ids: list[str],
+    ) -> dict[str, dict[str, UploadFile]]:
+        if not message_ids:
+            return {}
+
+        attachments = list(
+            self.db.scalars(
+                select(MessageAttachment).where(MessageAttachment.message_id.in_(message_ids))
+            )
+        )
+        file_ids = sorted({attachment.file_id for attachment in attachments})
+        if not file_ids:
+            return {}
+
+        files = {
+            file.id: file
+            for file in self.db.scalars(
+                select(UploadFile).where(
+                    UploadFile.id.in_(file_ids),
+                    UploadFile.deleted_at.is_(None),
+                    UploadFile.status != "deleted",
+                )
+            )
+        }
+
+        result: dict[str, dict[str, UploadFile]] = {}
+        for attachment in attachments:
+            file = files.get(attachment.file_id)
+            if not file:
+                continue
+            result.setdefault(attachment.message_id, {})[attachment.file_id] = file
+        return result
+
     def _extract_file_ids(self, content: list[MessageContentItem]) -> list[str]:
         file_ids = []
         for item in content:
@@ -262,16 +304,45 @@ class ConversationService:
             "updated_at": conversation.updated_at,
         }
 
-    def _message_response(self, message: ConversationMessage) -> dict:
+    def _message_response(
+        self,
+        message: ConversationMessage,
+        files_by_id: dict[str, UploadFile] | None = None,
+    ) -> dict:
         return {
             "id": message.id,
             "conversation_id": message.conversation_id,
             "role": message.role,
-            "content": message.content_json,
+            "content": self._message_content_response(message.content_json, files_by_id or {}),
             "intent": message.intent,
             "requires_review": message.requires_review,
             "created_at": message.created_at,
         }
+
+    def _message_content_response(
+        self,
+        content: Any,
+        files_by_id: dict[str, UploadFile],
+    ) -> Any:
+        if not isinstance(content, list):
+            return content
+
+        response = []
+        for part in content:
+            if not isinstance(part, dict):
+                response.append(part)
+                continue
+
+            item = dict(part)
+            if item.get("type") == "image":
+                file_id = item.get("file_id")
+                file = files_by_id.get(file_id) if isinstance(file_id, str) else None
+                if file:
+                    item["url"] = file.object_key or file.client_local_ref
+                    item["mime_type"] = file.mime_type
+                    item["storage_provider"] = file.storage_provider
+            response.append(item)
+        return response
 
 
 def get_conversation_service(

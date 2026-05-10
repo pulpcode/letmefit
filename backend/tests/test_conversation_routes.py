@@ -2,9 +2,9 @@ from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
 from app.main import create_app
-from app.models import User
+from app.models import ConversationMessage, UploadFile, User
 from app.schemas.conversation import ConversationCreateRequest, MessageCreateRequest
-from app.services.conversations import get_conversation_service
+from app.services.conversations import ConversationService, get_conversation_service
 from app.services.pending_actions import get_pending_action_service
 
 
@@ -256,3 +256,42 @@ def test_list_messages_and_pending_actions_use_conversation_id() -> None:
     assert pending_actions.json()["data"]["pending_actions"][0]["pending_action_id"] == "pa_test"
     assert conversation_service.calls[0] == ("messages", "user_test", "conv_test")
     assert pending_action_service.calls[0] == ("pending", "user_test", "conv_test")
+
+
+def test_message_response_enriches_image_parts_with_upload_url() -> None:
+    service = ConversationService.__new__(ConversationService)
+    message = ConversationMessage(
+        id="msg_image",
+        conversation_id="conv_test",
+        user_id="user_test",
+        role="user",
+        content_json=[
+            {"type": "image", "file_id": "file_image", "source": "camera"},
+            {"type": "text", "source": "vision", "text": "图片理解: 一碗米饭"},
+        ],
+        intent="fitness_record",
+        requires_review=True,
+        created_at="2026-05-01T12:00:00",
+    )
+    file = UploadFile(
+        id="file_image",
+        user_id="user_test",
+        storage_provider="local_server",
+        client_local_ref=None,
+        bucket=None,
+        object_key="https://www.letmefit.cloud/media/user_test/file_image.jpg",
+        mime_type="image/jpeg",
+        size_bytes=1234,
+        source="camera",
+        retention_policy="transient",
+        status="ready",
+        created_at="2026-05-01T12:00:00",
+    )
+
+    response = service._message_response(message, {"file_image": file})
+
+    assert response["content"][0]["url"] == (
+        "https://www.letmefit.cloud/media/user_test/file_image.jpg"
+    )
+    assert response["content"][0]["mime_type"] == "image/jpeg"
+    assert response["content"][1]["source"] == "vision"

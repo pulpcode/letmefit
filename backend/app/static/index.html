@@ -7,7 +7,7 @@
     <style>
       :root {
         color-scheme: light;
-        --bg: #f7f8fa;
+        --bg: #f0f4f8;
         --panel: #ffffff;
         --text: #18202a;
         --muted: #5d6a78;
@@ -18,29 +18,26 @@
         --ok: #157f3b;
       }
 
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
 
-      body {
+      html, body {
+        height: 100%;
         margin: 0;
-        background: var(--bg);
-        color: var(--text);
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
         font-size: 14px;
         line-height: 1.5;
+        color: var(--text);
+        background: var(--bg);
       }
 
+      body { display: flex; flex-direction: column; }
+
+      /* ── Header ── */
       header {
+        flex: none;
         border-bottom: 1px solid var(--line);
         background: var(--panel);
-      }
-
-      main,
-      .bar {
-        width: min(1380px, calc(100vw - 32px));
-        margin: 0 auto;
       }
 
       .bar {
@@ -48,246 +45,129 @@
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        min-height: 68px;
+        padding: 0 20px;
+        min-height: 52px;
       }
 
-      h1 {
-        margin: 0;
-        font-size: 20px;
-        font-weight: 700;
-      }
+      .bar-left { display: flex; align-items: center; gap: 12px; }
 
-      main {
+      h1 { margin: 0; font-size: 17px; font-weight: 700; }
+
+      /* ── App layout ── */
+      main.app-layout {
+        flex: 1;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(420px, 0.8fr);
-        gap: 16px;
-        padding: 18px 0 28px;
+        grid-template-columns: 1fr 400px;
+        overflow: hidden;
+        min-height: 0;
       }
 
-      section {
+      /* ── Chat pane (left) ── */
+      .chat-pane {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
+        border-right: 1px solid var(--line);
         background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 16px;
       }
 
-      .stack {
-        display: grid;
-        gap: 16px;
+      .chat-pane-header {
+        flex: none;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
       }
 
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-      }
-
-      h2 {
-        margin: 0 0 12px;
-        font-size: 16px;
-      }
-
-      label {
-        display: grid;
-        gap: 6px;
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 600;
-      }
-
-      input,
-      select,
-      textarea {
-        width: 100%;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 9px 10px;
-        color: var(--text);
-        background: #fff;
-        font: inherit;
-      }
-
-      label.checkbox {
+      .chat-pane-title-row {
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-top: 12px;
-        font-size: 13px;
+        flex-wrap: wrap;
       }
 
-      label.checkbox input {
-        width: auto;
-      }
-
-      textarea {
-        min-height: 92px;
-        resize: vertical;
-      }
-
-      button {
-        border: 0;
-        border-radius: 6px;
-        padding: 9px 12px;
-        color: #fff;
-        background: var(--primary);
-        font-weight: 650;
-        cursor: pointer;
-      }
-
-      button:hover {
-        background: var(--primary-dark);
-      }
-
-      button.secondary {
+      .title-input {
+        font-weight: 700;
+        font-size: 15px;
+        border: none;
+        border-bottom: 1px solid var(--line);
+        border-radius: 0;
+        padding: 2px 4px;
+        width: 130px;
         color: var(--text);
-        background: #eef2f7;
+        background: transparent;
       }
 
-      button.secondary:hover {
-        background: #e3e8ef;
+      .title-input:focus {
+        outline: none;
+        border-bottom-color: var(--primary);
       }
 
-      .actions {
+      .conv-id-input {
+        font-size: 12px;
+        color: var(--muted);
+        font-family: ui-monospace, monospace;
+        padding: 5px 8px;
+        width: 100%;
+      }
+
+      .chat-pane-btn-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 12px;
-      }
-
-      .bar .actions {
-        margin-top: 0;
-      }
-
-      .pill {
-        display: inline-flex;
-        align-items: center;
         gap: 6px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 5px 10px;
-        color: var(--muted);
-        background: #fff;
       }
 
-      .pill.ok {
-        color: var(--ok);
-      }
-
-      .pill.warn {
-        color: var(--danger);
-      }
-
-      pre {
-        min-height: 300px;
-        max-height: 520px;
-        margin: 0;
-        overflow: auto;
-        border-radius: 8px;
-        padding: 12px;
-        color: #dce7f7;
-        background: #111827;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      .state {
-        display: grid;
-        gap: 8px;
-        margin-top: 12px;
-      }
-
-      .state code {
-        color: var(--muted);
-        word-break: break-all;
-      }
-
-      .state pre.error {
-        color: #fca5a5;
-      }
-
-      .state.copyable {
-        position: relative;
-      }
-
-      .copy-btn {
-        position: absolute;
-        top: 0;
-        right: 0;
-        font-size: 11px;
-        padding: 2px 8px;
-      }
-
-      .output-stack {
-        display: grid;
-        gap: 16px;
-        position: sticky;
-        top: 16px;
-        max-height: calc(100vh - 32px);
+      /* Scrollable area: messages + pending panel */
+      .chat-scrollable {
+        flex: 1;
         overflow-y: auto;
-        align-self: start;
-      }
-
-      .chat-panel,
-      .pending-panel {
-        margin-top: 14px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: #fbfcfe;
-      }
-
-      .panel-head {
+        background: var(--bg);
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        border-bottom: 1px solid var(--line);
-        padding: 10px 12px;
-      }
-
-      .panel-title {
-        font-weight: 700;
+        flex-direction: column;
+        min-height: 0;
       }
 
       .chat-list {
         display: grid;
         gap: 10px;
-        max-height: 380px;
-        overflow: auto;
-        padding: 12px;
+        padding: 16px;
       }
 
+      /* ── Message bubbles ── */
       .message {
         display: grid;
         gap: 4px;
-        max-width: 86%;
+        max-width: 80%;
         border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 9px 10px;
+        border-radius: 12px;
+        padding: 10px 12px;
         background: #fff;
       }
 
       .message.user {
         justify-self: end;
-        border-color: #c8d8f3;
-        background: #eef5ff;
+        border-color: #b6cdee;
+        background: #e8f0fe;
+        border-radius: 12px 12px 2px 12px;
       }
 
       .message.assistant {
         justify-self: start;
+        border-radius: 12px 12px 12px 2px;
       }
 
-      .message.has-debug {
-        cursor: pointer;
-      }
-
-      .message.has-debug:hover {
-        border-color: var(--primary);
-      }
+      .message.has-debug { cursor: pointer; }
+      .message.has-debug:hover { border-color: var(--primary); }
 
       .message-role {
         color: var(--muted);
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
       }
 
       .message-text {
@@ -297,7 +177,33 @@
 
       .empty-note {
         color: var(--muted);
-        padding: 12px;
+        padding: 16px 12px;
+        font-size: 13px;
+        text-align: center;
+      }
+
+      /* ── Pending panel (inside scrollable) ── */
+      .pending-panel {
+        border-top: 2px solid var(--line);
+        background: #f7f8fa;
+        flex: none;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border-bottom: 1px solid var(--line);
+        padding: 8px 14px;
+      }
+
+      .panel-title {
+        font-weight: 700;
+        font-size: 13px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
       }
 
       .pending-list {
@@ -322,9 +228,7 @@
         gap: 10px;
       }
 
-      .pending-title {
-        font-weight: 700;
-      }
+      .pending-title { font-weight: 700; }
 
       .meta-row {
         display: flex;
@@ -340,39 +244,279 @@
         gap: 6px 10px;
       }
 
-      .kv {
-        color: var(--muted);
-        font-size: 12px;
+      .kv { color: var(--muted); font-size: 12px; }
+      .kv strong { color: var(--text); font-size: 13px; }
+
+      /* ── Input area at bottom ── */
+      .chat-input-area {
+        flex: none;
+        padding: 10px 14px;
+        border-top: 1px solid var(--line);
+        background: var(--panel);
       }
 
-      .kv strong {
+      .input-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .input-row {
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+      }
+
+      .input-row textarea {
+        flex: 1;
+        min-height: 68px;
+        max-height: 160px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font: inherit;
+        font-size: 14px;
         color: var(--text);
+        background: #fff;
+        line-height: 1.5;
+      }
+
+      .input-row textarea:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px #1769e018;
+      }
+
+      .send-btn {
+        flex: none;
+        align-self: flex-end;
+        text-align: center;
+        line-height: 1.3;
+        padding: 9px 16px;
+      }
+
+      .send-btn small {
+        display: block;
+        font-size: 10px;
+        opacity: 0.65;
+        font-weight: 400;
+      }
+
+      /* ── Sidebar (right) ── */
+      .sidebar {
+        height: 100%;
+        overflow-y: auto;
+        background: #f5f7fa;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .sidebar details {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        flex: none;
+      }
+
+      .sidebar details summary {
+        color: var(--text);
+        font-weight: 700;
+        font-size: 13px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        user-select: none;
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .sidebar details summary::-webkit-details-marker { display: none; }
+
+      .sidebar details summary::before {
+        content: '▸';
+        font-size: 10px;
+        color: var(--muted);
+        transition: transform 0.15s;
+        display: inline-block;
+      }
+
+      .sidebar details[open] > summary::before {
+        transform: rotate(90deg);
+      }
+
+      .sidebar-section {
+        padding: 10px 12px 12px;
+        border-top: 1px solid var(--line);
+      }
+
+      /* ── Shared form styles ── */
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 10px;
+      }
+
+      label {
+        display: grid;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 6px 8px;
+        color: var(--text);
+        background: #fff;
+        font: inherit;
         font-size: 13px;
       }
 
-      details summary {
-        color: var(--primary);
+      label.checkbox {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--muted);
+        text-transform: none;
+        letter-spacing: normal;
+      }
+
+      label.checkbox input { width: auto; }
+
+      textarea { min-height: 72px; resize: vertical; }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 7px 12px;
+        color: #fff;
+        background: var(--primary);
+        font-weight: 600;
+        font-size: 13px;
         cursor: pointer;
-        font-weight: 650;
+        white-space: nowrap;
       }
 
-      details pre {
-        min-height: 120px;
-        max-height: 260px;
-        margin-top: 8px;
+      button:hover { background: var(--primary-dark); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      button.secondary {
+        color: var(--text);
+        background: #eef2f7;
       }
 
-      @media (max-width: 920px) {
-        main {
+      button.secondary:hover { background: #e3e8ef; }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .bar .actions { margin-top: 0; }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        color: var(--muted);
+        background: #fff;
+        white-space: nowrap;
+      }
+
+      .pill.ok  { color: var(--ok);    border-color: #a5d6b7; background: #f0faf4; }
+      .pill.warn{ color: var(--danger); border-color: #f7c5c0; background: #fff5f4; }
+
+      /* ── Debug output ── */
+      .state {
+        display: grid;
+        gap: 5px;
+        margin-top: 10px;
+        font-size: 12px;
+      }
+
+      .state:first-child { margin-top: 0; }
+
+      .state code {
+        color: var(--muted);
+        word-break: break-all;
+        font-size: 11px;
+        background: #f3f4f6;
+        border-radius: 4px;
+        padding: 4px 6px;
+      }
+
+      .state.copyable { position: relative; }
+
+      .copy-btn {
+        position: absolute;
+        top: 22px;
+        right: 0;
+        font-size: 11px;
+        padding: 2px 8px;
+      }
+
+      pre {
+        min-height: 80px;
+        max-height: 200px;
+        margin: 0;
+        overflow: auto;
+        border-radius: 6px;
+        padding: 8px 10px;
+        color: #dce7f7;
+        background: #111827;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      /* pending-card details */
+      .pending-card details summary {
+        color: var(--primary);
+        font-weight: 600;
+        font-size: 12px;
+        cursor: pointer;
+        padding: 0;
+      }
+
+      .pending-card details pre {
+        min-height: 60px;
+        max-height: 180px;
+        margin-top: 6px;
+      }
+
+      @media (max-width: 860px) {
+        main.app-layout {
           grid-template-columns: 1fr;
+          overflow: auto;
         }
+        .chat-pane { height: calc(100vh - 52px); }
+        .sidebar { height: auto; border-top: 1px solid var(--line); overflow: visible; }
       }
     </style>
   </head>
   <body>
     <header>
       <div class="bar">
-        <div>
+        <div class="bar-left">
           <h1>LetMeFit API Test</h1>
           <div class="pill" id="statusPill">未连接</div>
         </div>
@@ -384,150 +528,32 @@
       </div>
     </header>
 
-    <main>
-      <div class="stack">
-        <section>
-          <h2>连接</h2>
-          <div class="grid">
-            <label>
-              API Base
-              <input id="apiBase" value="/v1" />
-            </label>
-            <label>
-              手机号
-              <input id="phone" value="13800138000" />
-            </label>
-          </div>
-          <div class="actions">
-            <button id="health">健康检查</button>
-            <button id="sendSms">发送验证码</button>
-            <button id="verifySms">验证码登录</button>
-          </div>
-          <div class="grid" style="margin-top: 12px">
-            <label>
-              验证码
-              <input id="code" value="123456" />
-            </label>
-            <label>
-              Refresh Token
-              <input id="refreshToken" />
-            </label>
-          </div>
-          <div class="actions">
-            <button class="secondary" id="refreshAccess">刷新 Access Token</button>
-            <button class="secondary" id="logout">退出登录</button>
-          </div>
-        </section>
+    <main class="app-layout">
 
-        <section>
-          <h2>档案</h2>
-          <div class="grid">
-            <label>
-              年龄
-              <input id="age" type="number" value="30" />
-            </label>
-            <label>
-              性别
-              <select id="sex">
-                <option value="male">male</option>
-                <option value="female">female</option>
-                <option value="unknown">unknown</option>
-              </select>
-            </label>
-            <label>
-              身高 cm
-              <input id="heightCm" type="number" value="175" />
-            </label>
-            <label>
-              当前体重 kg
-              <input id="currentWeightKg" type="number" step="0.1" value="72.4" />
-            </label>
-            <label>
-              目标体重 kg
-              <input id="targetWeightKg" type="number" step="0.1" value="68" />
-            </label>
-            <label>
-              目标
-              <select id="goalType">
-                <option value="fat_loss">fat_loss</option>
-                <option value="muscle_gain">muscle_gain</option>
-                <option value="maintenance">maintenance</option>
-              </select>
-            </label>
-            <label>
-              运动水平
-              <select id="activityLevel">
-                <option value="sedentary">sedentary</option>
-                <option value="light">light</option>
-                <option value="moderate" selected>moderate</option>
-                <option value="active">active</option>
-                <option value="very_active">very_active</option>
-              </select>
-            </label>
-          </div>
-          <div class="actions">
-            <button id="getProfile">读取档案</button>
-            <button id="saveProfile">保存档案</button>
-          </div>
-        </section>
+      <!-- ===== CHAT PANE ===== -->
+      <div class="chat-pane">
 
-        <section>
-          <h2>会话与确认</h2>
-          <div class="grid">
-            <label>
-              会话标题
-              <input id="conversationTitle" value="本机测试" />
-            </label>
-            <label>
-              Conversation ID
-              <input id="conversationId" />
-            </label>
+        <!-- Chat header: conversation controls -->
+        <div class="chat-pane-header">
+          <div class="chat-pane-title-row">
+            <input id="conversationTitle" class="title-input" value="本机测试" placeholder="会话标题" />
+            <span class="pill" id="summaryPill" style="display:none">整理中</span>
+            <span class="pill" id="chatCount">0 条消息</span>
           </div>
-          <label style="margin-top: 12px">
-            消息
-            <textarea id="messageText">今天午餐吃了鸡胸肉和一碗米饭，体重72.4公斤</textarea>
-          </label>
-          <label class="checkbox">
-            <input id="includeDebugContext" type="checkbox" checked />
-            显示 LLM 上下文
-          </label>
-          <label class="checkbox">
-            <input id="includeAgentTrace" type="checkbox" checked />
-            显示 Agent Trace
-          </label>
-          <label class="checkbox">
-            <input id="continueAgentAfterConfirm" type="checkbox" checked />
-            确认/放弃后继续 Agent
-          </label>
-          <div class="grid" style="margin-top: 12px">
-            <label>
-              Pending Action ID
-              <input id="pendingActionId" />
-            </label>
-            <label>
-              查询日期
-              <input id="recordDate" type="date" />
-            </label>
+          <input id="conversationId" class="conv-id-input" placeholder="Conversation ID" />
+          <div class="chat-pane-btn-row">
+            <button id="createConversation">新建会话</button>
+            <button class="secondary" id="loadLatestConversation">加载最近待确认</button>
+            <button class="secondary" id="refreshMessages">刷新消息</button>
           </div>
-          <div class="actions">
-            <button id="createConversation">创建会话</button>
-            <button class="secondary" id="loadLatestConversation">加载最近待确认会话</button>
-            <button class="secondary" id="refreshMessages">刷新消息历史</button>
-            <button id="sendMessage">发送消息</button>
-            <button class="secondary" id="listPending">查询动作历史</button>
-            <button id="confirmPending">确认动作</button>
-            <button id="confirmAllPending">确认全部待确认动作</button>
+        </div>
+
+        <!-- Scrollable: messages + pending actions -->
+        <div class="chat-scrollable">
+          <div class="chat-list" id="chatList">
+            <div class="empty-note">创建或加载会话后显示消息历史。</div>
           </div>
-          <div class="chat-panel">
-            <div class="panel-head">
-              <span class="panel-title">聊天历史</span>
-              <span class="pill" id="chatCount">0 条消息</span>
-              <span class="pill" id="summaryPill" style="display:none">整理中</span>
-            </div>
-            <div class="chat-list" id="chatList">
-              <div class="empty-note">创建或加载会话后显示消息历史。</div>
-            </div>
-          </div>
+
           <div class="pending-panel">
             <div class="panel-head">
               <span class="panel-title">待确认动作</span>
@@ -537,79 +563,223 @@
               <div class="empty-note">发送餐食或身体指标消息后，待确认动作会显示在这里。</div>
             </div>
           </div>
-        </section>
+        </div>
 
-        <section>
-          <h2>OSS 语音识别</h2>
-          <div class="grid">
-            <label>
-              音频类型
-              <select id="audioKind">
-                <option value="meal">餐食语音</option>
-                <option value="body_metric">身体指标语音</option>
-              </select>
+        <!-- Input area fixed at bottom -->
+        <div class="chat-input-area">
+          <div class="input-options">
+            <label class="checkbox">
+              <input id="includeDebugContext" type="checkbox" checked />
+              显示 LLM 上下文
             </label>
-            <label>
-              MIME
-              <input id="audioMime" value="audio/mp4" />
+            <label class="checkbox">
+              <input id="includeAgentTrace" type="checkbox" checked />
+              显示 Agent Trace
             </label>
-          </div>
-          <label style="margin-top: 12px">
-            OSS 音频 URL
-            <textarea id="audioUrl">https://fit-app-test.oss-cn-beijing.aliyuncs.com/local-test/eat.m4a</textarea>
-          </label>
-          <div class="actions">
-            <button id="createAudioUpload">创建 OSS Upload</button>
-            <button id="sendAudioMessage">发送语音消息</button>
-            <button id="runAudioSmoke">一键语音测试</button>
-          </div>
-          <div class="grid" style="margin-top: 12px">
-            <label>
-              Audio File ID
-              <input id="audioFileId" />
-            </label>
-            <label>
-              语音时长秒
-              <input id="audioDuration" type="number" value="10" />
+            <label class="checkbox">
+              <input id="continueAgentAfterConfirm" type="checkbox" checked />
+              确认/放弃后继续 Agent
             </label>
           </div>
-        </section>
-
-        <section>
-          <h2>记录查询</h2>
-          <div class="actions">
-            <button class="secondary" id="listMeals">查询餐食</button>
-            <button class="secondary" id="listBodyMetrics">查询身体指标</button>
-            <button class="secondary" id="refreshArchive">查询每日归档</button>
-            <button class="secondary" id="generateSummary">生成每日总结</button>
+          <div class="input-row">
+            <textarea id="messageText" rows="3">今天午餐吃了鸡胸肉和一碗米饭，体重72.4公斤</textarea>
+            <button id="sendMessage" class="send-btn">
+              发送
+              <small>Ctrl+↵</small>
+            </button>
           </div>
-        </section>
+        </div>
       </div>
 
-      <section class="output-stack">
-        <div>
-          <h2>状态</h2>
-          <div class="state">
-            <span>Access Token</span>
-            <code id="accessTokenView">未登录</code>
+      <!-- ===== SIDEBAR ===== -->
+      <div class="sidebar">
+
+        <!-- Debug output (open by default) -->
+        <details open>
+          <summary>Debug 输出</summary>
+          <div class="sidebar-section">
+            <div class="state">
+              <span>Access Token</span>
+              <code id="accessTokenView">未登录</code>
+            </div>
+            <div class="state copyable">
+              <span>响应</span>
+              <button class="copy-btn secondary" data-target="responseOutput">复制</button>
+              <pre id="responseOutput"></pre>
+            </div>
+            <div class="state copyable">
+              <span>LLM 请求 body</span>
+              <button class="copy-btn secondary" data-target="llmRequestOutput">复制</button>
+              <pre id="llmRequestOutput"></pre>
+            </div>
+            <div class="state copyable">
+              <span>Agent Trace</span>
+              <button class="copy-btn secondary" data-target="agentTraceOutput">复制</button>
+              <pre id="agentTraceOutput"></pre>
+            </div>
           </div>
-        </div>
-        <div class="state copyable">
-          <span>响应</span>
-          <button class="copy-btn secondary" data-target="responseOutput">复制</button>
-          <pre id="responseOutput"></pre>
-        </div>
-        <div class="state copyable">
-          <span>LLM 请求 body</span>
-          <button class="copy-btn secondary" data-target="llmRequestOutput">复制</button>
-          <pre id="llmRequestOutput"></pre>
-        </div>
-        <div class="state copyable">
-          <span>Agent Trace</span>
-          <button class="copy-btn secondary" data-target="agentTraceOutput">复制</button>
-          <pre id="agentTraceOutput"></pre>
-        </div>
-      </section>
+        </details>
+
+        <!-- 动作管理 -->
+        <details>
+          <summary>动作管理</summary>
+          <div class="sidebar-section">
+            <div class="grid">
+              <label>
+                Pending Action ID
+                <input id="pendingActionId" />
+              </label>
+              <label>
+                查询日期
+                <input id="recordDate" type="date" />
+              </label>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="listPending">查询动作历史</button>
+              <button id="confirmPending">确认动作</button>
+              <button id="confirmAllPending">确认全部待确认</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- 连接 / 登录 -->
+        <details>
+          <summary>连接 / 登录</summary>
+          <div class="sidebar-section">
+            <div class="grid">
+              <label>
+                API Base
+                <input id="apiBase" value="/v1" />
+              </label>
+              <label>
+                手机号
+                <input id="phone" value="13800138000" />
+              </label>
+              <label>
+                验证码
+                <input id="code" value="123456" />
+              </label>
+              <label>
+                Refresh Token
+                <input id="refreshToken" />
+              </label>
+            </div>
+            <div class="actions">
+              <button id="health">健康检查</button>
+              <button id="sendSms">发送验证码</button>
+              <button id="verifySms">验证码登录</button>
+              <button class="secondary" id="refreshAccess">刷新 Access Token</button>
+              <button class="secondary" id="logout">退出登录</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- 用户档案 -->
+        <details>
+          <summary>用户档案</summary>
+          <div class="sidebar-section">
+            <div class="grid">
+              <label>
+                年龄
+                <input id="age" type="number" value="30" />
+              </label>
+              <label>
+                性别
+                <select id="sex">
+                  <option value="male">male</option>
+                  <option value="female">female</option>
+                  <option value="unknown">unknown</option>
+                </select>
+              </label>
+              <label>
+                身高 cm
+                <input id="heightCm" type="number" value="175" />
+              </label>
+              <label>
+                当前体重 kg
+                <input id="currentWeightKg" type="number" step="0.1" value="72.4" />
+              </label>
+              <label>
+                目标体重 kg
+                <input id="targetWeightKg" type="number" step="0.1" value="68" />
+              </label>
+              <label>
+                目标
+                <select id="goalType">
+                  <option value="fat_loss">fat_loss</option>
+                  <option value="muscle_gain">muscle_gain</option>
+                  <option value="maintenance">maintenance</option>
+                </select>
+              </label>
+              <label style="grid-column: span 2">
+                运动水平
+                <select id="activityLevel">
+                  <option value="sedentary">sedentary</option>
+                  <option value="light">light</option>
+                  <option value="moderate" selected>moderate</option>
+                  <option value="active">active</option>
+                  <option value="very_active">very_active</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button id="getProfile">读取档案</button>
+              <button id="saveProfile">保存档案</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- OSS 语音识别 -->
+        <details>
+          <summary>OSS 语音识别</summary>
+          <div class="sidebar-section">
+            <div class="grid">
+              <label>
+                音频类型
+                <select id="audioKind">
+                  <option value="meal">餐食语音</option>
+                  <option value="body_metric">身体指标语音</option>
+                </select>
+              </label>
+              <label>
+                MIME
+                <input id="audioMime" value="audio/mp4" />
+              </label>
+              <label>
+                Audio File ID
+                <input id="audioFileId" />
+              </label>
+              <label>
+                语音时长秒
+                <input id="audioDuration" type="number" value="10" />
+              </label>
+            </div>
+            <label style="margin-top: 10px">
+              OSS 音频 URL
+              <textarea id="audioUrl" rows="2">https://fit-app-test.oss-cn-beijing.aliyuncs.com/local-test/eat.m4a</textarea>
+            </label>
+            <div class="actions">
+              <button id="createAudioUpload">创建 OSS Upload</button>
+              <button id="sendAudioMessage">发送语音消息</button>
+              <button id="runAudioSmoke">一键语音测试</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- 记录查询 -->
+        <details>
+          <summary>记录查询</summary>
+          <div class="sidebar-section">
+            <div class="actions" style="margin-top: 0">
+              <button class="secondary" id="listMeals">查询餐食</button>
+              <button class="secondary" id="listBodyMetrics">查询身体指标</button>
+              <button class="secondary" id="refreshArchive">查询每日归档</button>
+              <button class="secondary" id="generateSummary">生成每日总结</button>
+            </div>
+          </div>
+        </details>
+
+      </div>
     </main>
 
     <script>
@@ -937,7 +1107,7 @@
           return requestBody;
         }
         return {
-          note: "本次响应没有 debug_context.llm_request_body。发送消息并勾选“显示 LLM 上下文”后会显示。",
+          note: "本次响应没有 debug_context.llm_request_body。发送消息并勾选"显示 LLM 上下文"后会显示。",
         };
       }
 
@@ -972,7 +1142,7 @@
           return trace;
         }
         return {
-          note: "本次响应没有 agent_trace。发送消息并勾选“显示 Agent Trace”后会显示。",
+          note: "本次响应没有 agent_trace。发送消息并勾选"显示 Agent Trace"后会显示。",
         };
       }
 

@@ -58,6 +58,7 @@ export function sendMessageStream(
   onDelta: (d: { type: string; text?: string }) => void,
   onDone: (data: SendMessageResponse) => void,
   onError: (err: Error) => void,
+  onFallback?: () => void,
 ): WechatMiniprogram.RequestTask {
   const tokens = getTokens();
   const header: Record<string, string> = { "content-type": "application/json" };
@@ -102,6 +103,9 @@ export function sendMessageStream(
           } catch (_) {}
         }
       }
+      // enableChunked 模式下 success.data 为空是微信的正常行为；
+      // 若此时 onChunkReceived 也未触发 done，走 fallback 从 REST API 拉取结果。
+      if (!doneCalled) { onFallback?.(); }
     },
     fail: () => onError(new Error("网络不可用")),
   });

@@ -299,6 +299,13 @@ Page({
           this._removeChatItem(streamingId);
           this.setData({ sending: false, streamingActive: false });
           showApiError(error);
+        },
+        () => {
+          // SSE 未送达（微信 enableChunked 下 onChunkReceived 未触发），从服务端拉取最新结果
+          if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+          this._removeChatItem(streamingId);
+          this.setData({ sending: false, streamingActive: false });
+          this.refreshConversation(conversationId);
         }
       );
     })();
@@ -546,6 +553,12 @@ Page({
           this._removeChatItem(streamingId);
           this.setData({ sending: false, streamingActive: false });
           showApiError(error);
+        },
+        () => {
+          if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+          this._removeChatItem(streamingId);
+          this.setData({ sending: false, streamingActive: false });
+          this.refreshConversation(conversationId);
         }
       );
       return; // streaming callbacks handle the rest

@@ -808,6 +808,28 @@ V1 支持可替换 extraction provider。当前可使用 `mock` 本地提取或 
 
 ASR 第一版支持 `dashscope_recording`，即百炼/DashScope Paraformer 录音文件识别。该接口要求音频是公网可访问 HTTP/HTTPS URL 或支持的 OSS URL；`client_local` 音频不会被后端直接识别，只会产生未处理状态，直到客户端提供临时可访问文件。
 
+### POST /conversations/{conversation_id}/messages/stream
+
+发送消息并以 SSE 返回过程增量。普通 JSON 接口仍是兼容 fallback；流式内容只用于展示识别/推理过程，正式餐食或身体指标记录仍必须通过 `pending_action` 确认后写入。
+
+图片消息的事件顺序：
+
+```text
+event: delta
+data: {"type":"vision_status","stage":"image_understanding","text":"正在读取图片内容"}
+
+event: delta
+data: {"type":"vision","stage":"image_understanding","text":"场景：餐盘中..."}
+
+event: delta
+data: {"type":"text","text":"我整理出"}
+
+event: done
+data: {"message_id":"msg_...","pending_actions":[...]}
+```
+
+`type=vision` 的内容来自 `InputNormalizer` 的图片理解结果，会在 Agent 继续处理前先发给客户端。客户端应把它展示为待确认卡之前的过程信息，不得直接保存为正式记录。
+
 ### GET /conversations/{conversation_id}/messages
 
 查询会话消息。只能查询当前登录用户自己的会话。

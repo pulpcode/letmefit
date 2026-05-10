@@ -56,17 +56,20 @@
         </view>
         <view wx:elif="{{item.kind === 'vision_reasoning'}}" class="message-row assistant vision-reasoning-row">
           <image class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
-          <view class="vision-reasoning-card">
+          <view class="vision-reasoning-card {{item.streaming ? 'vision-streaming' : 'vision-complete'}}">
             <view class="vision-scan-line"></view>
             <view class="vision-reasoning-head">
               <view class="vision-icon-wrap">
                 <t-icon name="image-search" size="28rpx" color="#00b4d8" />
               </view>
-              <text class="vision-title">图片理解</text>
-              <view class="vision-thinking-dots">
+              <text class="vision-title">{{item.stage}}</text>
+              <view wx:if="{{item.streaming}}" class="vision-thinking-dots">
                 <view class="vision-dot"></view>
                 <view class="vision-dot"></view>
                 <view class="vision-dot"></view>
+              </view>
+              <view wx:else class="vision-done-mark">
+                <t-icon name="check" size="22rpx" color="#06a77d" />
               </view>
             </view>
             <text class="vision-text">{{item.text}}</text>

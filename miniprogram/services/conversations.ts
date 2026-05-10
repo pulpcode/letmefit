@@ -3,6 +3,17 @@ import { getTokens } from "../utils/storage";
 import { request } from "../utils/request";
 import type { Conversation, ConversationMessage, MessagePart, PendingAction, SendMessageResponse } from "../types/api";
 
+export type StreamDelta = {
+  type: string;
+  text?: string;
+  message?: string;
+  content?: string;
+  source?: string;
+  stage?: string;
+  items?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
 class SSEParser {
   private buf = "";
   private decoder = new Utf8StreamDecoder();
@@ -145,7 +156,7 @@ export function sendMessage(conversationId: string, content: MessagePart[]) {
 export function sendMessageStream(
   conversationId: string,
   content: MessagePart[],
-  onDelta: (d: { type: string; text?: string }) => void,
+  onDelta: (d: StreamDelta) => void,
   onDone: (data: SendMessageResponse) => void,
   onError: (err: Error) => void,
   onFallback?: () => void,
@@ -159,6 +170,23 @@ export function sendMessageStream(
   let doneCalled = false;
   const handleDone = (data: SendMessageResponse) => {
     if (!doneCalled) { doneCalled = true; onDone(data); }
+  };
+  const handleSseEvent = (event: string, data: string) => {
+    try {
+      const parsed = JSON.parse(data);
+      if (event === "delta") onDelta(parsed);
+      else if (event === "progress") onDelta({ ...parsed, type: "progress" });
+      else if (event === "partial_result") onDelta({ ...parsed, type: "partial_result" });
+      else if (event === "vision_delta" || event === "vision_result") {
+        onDelta({ ...parsed, type: "vision" });
+      } else if (event === "candidate_action") {
+        onDelta({ ...parsed, type: "candidate_action" });
+      } else if (event === "done") {
+        handleDone(parsed as SendMessageResponse);
+      } else if (event === "error") {
+        onError(new Error(parsed.message || "未知错误"));
+      }
+    } catch (_) {}
   };
   const task = wx.request({
     url: `${getApiBaseUrl()}/conversations/${conversationId}/messages/stream`,
@@ -175,12 +203,8 @@ export function sendMessageStream(
       // success.data 包含完整响应体，从中解析 SSE 事件。
       if (!doneCalled && res.data) {
         for (const { event, data } of parseSSEText(decodeResponseData(res.data))) {
-          try {
-            const parsed = JSON.parse(data);
-            if (event === "delta") onDelta(parsed);
-            else if (event === "done") { handleDone(parsed as SendMessageResponse); break; }
-            else if (event === "error") { onError(new Error(parsed.message || "未知错误")); break; }
-          } catch (_) {}
+          handleSseEvent(event, data);
+          if (event === "done" || event === "error") break;
         }
       }
       // enableChunked 模式下 success.data 为空是微信的正常行为；
@@ -192,12 +216,7 @@ export function sendMessageStream(
   if (typeof task.onChunkReceived === "function") {
     task.onChunkReceived((res: any) => {
       for (const { event, data } of parser.feed(res.data as ArrayBuffer)) {
-        try {
-          const parsed = JSON.parse(data);
-          if (event === "delta") onDelta(parsed);
-          else if (event === "done") handleDone(parsed as SendMessageResponse);
-          else if (event === "error") onError(new Error(parsed.message || "未知错误"));
-        } catch (_) {}
+        handleSseEvent(event, data);
       }
     });
   }

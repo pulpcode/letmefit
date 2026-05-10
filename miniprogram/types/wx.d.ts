@@ -10,4 +10,9 @@ declare namespace WechatMiniprogram {
   interface IAnyObject {
     [key: string]: any;
   }
+
+  interface RequestTask {
+    onChunkReceived?: (callback: (res: { data: ArrayBuffer }) => void) => void;
+    abort?: () => void;
+  }
 }

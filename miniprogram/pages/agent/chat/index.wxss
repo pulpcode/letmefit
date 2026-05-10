@@ -234,6 +234,10 @@
   pointer-events: none;
 }
 
+.vision-complete::before {
+  display: none;
+}
+
 .vision-scan-line {
   position: absolute;
   left: 0;
@@ -242,6 +246,11 @@
   height: 4rpx;
   background: linear-gradient(90deg, transparent, #06d6a0, #00b4d8, transparent);
   animation: visionScan 2s ease-in-out infinite;
+}
+
+.vision-complete .vision-scan-line {
+  opacity: 0;
+  animation: none;
 }
 
 .vision-reasoning-head {
@@ -276,6 +285,16 @@
   align-items: center;
 }
 
+.vision-done-mark {
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 9999rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 214, 160, 0.14);
+}
+
 .vision-dot {
   width: 8rpx;
   height: 8rpx;
@@ -300,6 +319,7 @@
   color: #41546b;
   font-size: 26rpx;
   line-height: 38rpx;
+  white-space: pre-line;
 }
 
 @keyframes visionShimmer {

@@ -1,5 +1,4 @@
 import json
-import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
@@ -65,17 +64,15 @@ def send_message_stream(
     service: Annotated[ConversationService, Depends(get_conversation_service)],
 ):
     def generate():
-        yield _sse("delta", {"type": "thinking"})
         try:
-            result = service.send_message(current_user.id, conversation_id, payload)
+            for event, data in service.send_message_stream_events(
+                current_user.id,
+                conversation_id,
+                payload,
+            ):
+                yield _sse(event, data)
         except Exception as exc:
             yield _sse("error", {"message": str(exc)})
-            return
-        text = result.get("assistant_text") or ""
-        for i in range(0, len(text), 3):
-            yield _sse("delta", {"type": "text", "text": text[i : i + 3]})
-            time.sleep(0.025)
-        yield _sse("done", result)
 
     return StreamingResponse(
         generate(),

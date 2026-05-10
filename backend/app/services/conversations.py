@@ -1,3 +1,5 @@
+import time
+from collections.abc import Iterator
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -6,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.agent_runtime import AgentRuntime
 from app.ai.extraction_service import ExtractionService
-from app.ai.input_normalizer import InputNormalizer
+from app.ai.input_normalizer import InputNormalizer, NormalizedInput
 from app.ai.prompt_payload import build_extraction_user_prompt_payload
 from app.ai.types import ExtractionInput
 from app.auth.security import new_id, utc_now
@@ -82,6 +84,89 @@ class ConversationService:
         conversation_id: str,
         payload: MessageCreateRequest,
     ) -> dict:
+        conversation, user_message, _normalized_input, context, extraction_input = (
+            self._prepare_user_message(user_id, conversation_id, payload)
+        )
+        extraction_result = self.agent_runtime.run(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            message_id=user_message.id,
+            content=extraction_input.content,
+            context=context,
+        )
+        return self._finalize_message_response(
+            conversation=conversation,
+            user_message=user_message,
+            extraction_input=extraction_input,
+            extraction_result=extraction_result,
+            payload=payload,
+        )
+
+    def send_message_stream_events(
+        self,
+        user_id: str,
+        conversation_id: str,
+        payload: MessageCreateRequest,
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
+        has_image = any(item.type == "image" for item in payload.content)
+        yield ("delta", {"type": "thinking", "stage": "received"})
+        if has_image:
+            yield (
+                "delta",
+                {
+                    "type": "vision_status",
+                    "stage": "image_understanding",
+                    "text": "正在读取图片内容",
+                },
+            )
+
+        conversation, user_message, normalized_input, context, extraction_input = (
+            self._prepare_user_message(user_id, conversation_id, payload)
+        )
+        for description in self._vision_descriptions(normalized_input):
+            for chunk in self._text_chunks(description, size=12):
+                yield (
+                    "delta",
+                    {
+                        "type": "vision",
+                        "stage": "image_understanding",
+                        "text": chunk,
+                    },
+                )
+                time.sleep(0.025)
+
+        extraction_result = self.agent_runtime.run(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            message_id=user_message.id,
+            content=extraction_input.content,
+            context=context,
+        )
+        result = self._finalize_message_response(
+            conversation=conversation,
+            user_message=user_message,
+            extraction_input=extraction_input,
+            extraction_result=extraction_result,
+            payload=payload,
+        )
+        text = result.get("assistant_text") or ""
+        for chunk in self._text_chunks(text, size=3):
+            yield ("delta", {"type": "text", "text": chunk})
+            time.sleep(0.025)
+        yield ("done", result)
+
+    def _prepare_user_message(
+        self,
+        user_id: str,
+        conversation_id: str,
+        payload: MessageCreateRequest,
+    ) -> tuple[
+        Conversation,
+        ConversationMessage,
+        NormalizedInput,
+        dict[str, Any],
+        ExtractionInput,
+    ]:
         conversation = self._get_owned_conversation(user_id, conversation_id)
         content = [item.model_dump(mode="json", exclude_none=True) for item in payload.content]
         user_message = ConversationMessage(
@@ -115,13 +200,17 @@ class ConversationService:
             content=normalized_input.content,
             context=context,
         )
-        extraction_result = self.agent_runtime.run(
-            user_id=user_id,
-            conversation_id=conversation.id,
-            message_id=user_message.id,
-            content=extraction_input.content,
-            context=context,
-        )
+        return conversation, user_message, normalized_input, context, extraction_input
+
+    def _finalize_message_response(
+        self,
+        *,
+        conversation: Conversation,
+        user_message: ConversationMessage,
+        extraction_input: ExtractionInput,
+        extraction_result: dict[str, Any],
+        payload: MessageCreateRequest,
+    ) -> dict:
         debug_context = (
             self._debug_context(extraction_input, extraction_result)
             if payload.include_debug_context
@@ -131,7 +220,7 @@ class ConversationService:
         assistant_message = ConversationMessage(
             id=new_id("msg"),
             conversation_id=conversation.id,
-            user_id=user_id,
+            user_id=user_message.user_id,
             role="assistant",
             content_json=extraction_result.get("assistant_content")
             or [{"type": "text", "text": extraction_result["assistant_text"]}],
@@ -144,7 +233,7 @@ class ConversationService:
         conversation.status = "active"
         self.db.add(assistant_message)
         self.db.flush()
-        summary_job = self.summary_service.enqueue_if_needed(user_id, conversation.id)
+        summary_job = self.summary_service.enqueue_if_needed(user_message.user_id, conversation.id)
         self.db.commit()
 
         response = {
@@ -164,6 +253,25 @@ class ConversationService:
         if debug_context is not None:
             response["debug_context"] = debug_context
         return response
+
+    def _vision_descriptions(self, normalized_input: NormalizedInput) -> list[str]:
+        descriptions: list[str] = []
+        for item in normalized_input.content:
+            if item.type != "text" or item.source != "vision" or not item.text:
+                continue
+            descriptions.append(self._strip_vision_prefix(item.text))
+        return [item for item in descriptions if item]
+
+    def _strip_vision_prefix(self, text: str) -> str:
+        value = text.strip()
+        for prefix in ("图片理解:", "图片理解："):
+            if value.startswith(prefix):
+                return value[len(prefix) :].strip()
+        return value
+
+    def _text_chunks(self, text: str, size: int) -> Iterator[str]:
+        for i in range(0, len(text), size):
+            yield text[i : i + size]
 
     def _debug_context(
         self,

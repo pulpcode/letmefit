@@ -3,12 +3,19 @@ import { confirmPendingAction, discardPendingAction } from "../../../services/pe
 import { transcribeUploadFile, uploadLocalFile } from "../../../services/uploads";
 import { showApiError } from "../../../utils/request";
 import { getAgentAvatar } from "../../../utils/storage";
+import type { StreamDelta } from "../../../services/conversations";
 import type { AgentContinuation, ConversationMessage, MessagePart, PendingAction } from "../../../types/api";
 
 const VOICE_MAX_SECONDS = 20;
 const VOICE_MIN_DURATION_MS = 800;
 const VOICE_MIN_BYTES = 4 * 1024;
 const VOICE_TICK_MS = 200;
+const VISION_PROGRESS_STEPS = [
+  "正在读取图片内容",
+  "检查画面里的食物、餐具和份量线索",
+  "整理可见食物与置信度",
+  "准备生成待确认记录"
+];
 
 type ChatItem =
   | {
@@ -20,7 +27,14 @@ type ChatItem =
       imageUrls: string[];
       createdAt: string;
     }
-  | { kind: "vision_reasoning"; id: string; text: string; createdAt: string }
+  | {
+      kind: "vision_reasoning";
+      id: string;
+      text: string;
+      stage: string;
+      streaming: boolean;
+      createdAt: string;
+    }
   | { kind: "pending_action"; id: string; action: PendingAction; createdAt: string }
   | { kind: "pending_action_superseded"; id: string; pendingActionId: string; createdAt: string };
 
@@ -105,6 +119,35 @@ function stripVisionPrefix(text: string): string {
   return (text || "").replace(/^图片理解[:：]\s*/, "");
 }
 
+function formatVisionDelta(delta: StreamDelta): string {
+  if (delta.type === "vision_status" || delta.type === "progress") {
+    return String(delta.text || delta.message || "");
+  }
+  if (
+    delta.type === "vision" ||
+    delta.type === "vision_delta" ||
+    delta.source === "vision"
+  ) {
+    return stripVisionPrefix(String(delta.text || delta.content || delta.message || ""));
+  }
+  if (delta.type === "partial_result" && Array.isArray(delta.items)) {
+    return delta.items
+      .map((item) => {
+        const record = item as Record<string, unknown>;
+        const name = String(record.name || "").trim();
+        if (!name) return "";
+        const amount = String(record.amount || record.portion_hint || "").trim();
+        const confidence = typeof record.confidence === "number"
+          ? `置信度 ${Math.round(record.confidence * 100)}%`
+          : "";
+        return [name, amount, confidence].filter(Boolean).join("，");
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
 function visionTextFromContent(content?: any[]): string {
   if (!content) return "";
   return (content as any[])
@@ -131,6 +174,8 @@ function buildChatItems(messages: ParsedMessage[], pendingActions: PendingAction
         kind: "vision_reasoning",
         id: `${msg.id}_vision`,
         text: msg.visionText,
+        stage: "图片理解完成",
+        streaming: false,
         createdAt: msg.createdAt
       });
     }
@@ -303,6 +348,8 @@ Page({
       if (!conversationId) return;
 
       const now = new Date().toISOString();
+      const hasImageInput =
+        content.some((part) => part.type === "image") || Boolean(options?.userImages?.length);
       const localUserItem = createMessageItem({
         id: `local_user_${Date.now()}`,
         role: "user",
@@ -311,28 +358,91 @@ Page({
         createdAt: now
       });
       const streamingId = `streaming_${Date.now()}`;
-      const streamingItem = createMessageItem({
-        id: streamingId,
-        role: "assistant",
-        text: "",
-        createdAt: now
-      });
+      const visionStreamId = hasImageInput ? `vision_streaming_${Date.now()}` : "";
+      const initialItems: ChatItem[] = [...this.data.chatItems, localUserItem];
+      if (hasImageInput) {
+        initialItems.push({
+          kind: "vision_reasoning",
+          id: visionStreamId,
+          text: VISION_PROGRESS_STEPS[0],
+          stage: "正在理解图片",
+          streaming: true,
+          createdAt: now
+        });
+      } else {
+        initialItems.push(createMessageItem({
+          id: streamingId,
+          role: "assistant",
+          text: "",
+          createdAt: now
+        }));
+      }
       this.setData({
         sending: true,
         streamingActive: true,
-        chatItems: [...this.data.chatItems, localUserItem, streamingItem]
+        chatItems: initialItems
       });
       this.scrollToBottom();
 
       let pendingText = "";
+      let visionTextBuffer = "";
       let flushTimer: ReturnType<typeof setTimeout> | null = null;
+      let visionProgressIndex = 0;
+      let visionProgressTimer: ReturnType<typeof setInterval> | null = null;
+
+      const clearVisionProgress = () => {
+        if (visionProgressTimer) {
+          clearInterval(visionProgressTimer);
+          visionProgressTimer = null;
+        }
+      };
+
+      const setVisionText = (text: string, streaming = true) => {
+        if (!visionStreamId || !text.trim()) return;
+        this.setData({
+          chatItems: this.data.chatItems.map((item) =>
+            item.id === visionStreamId && item.kind === "vision_reasoning"
+              ? {
+                  ...item,
+                  text,
+                  stage: streaming ? "正在理解图片" : "图片理解完成",
+                  streaming
+                }
+              : item
+          )
+        });
+        this.scrollToBottom();
+      };
+
+      if (hasImageInput && visionStreamId) {
+        visionProgressTimer = setInterval(() => {
+          if (visionTextBuffer) return;
+          visionProgressIndex = Math.min(
+            visionProgressIndex + 1,
+            VISION_PROGRESS_STEPS.length - 1
+          );
+          setVisionText(VISION_PROGRESS_STEPS.slice(0, visionProgressIndex + 1).join("\n"));
+        }, 900);
+      }
 
       const flushText = () => {
         if (!pendingText) return;
         const toAdd = pendingText;
         pendingText = "";
+        const hasStreamingItem = this.data.chatItems.some((item) => item.id === streamingId);
+        const baseItems = hasStreamingItem
+          ? this.data.chatItems
+          : [
+              ...this.data.chatItems,
+              createMessageItem({
+                id: streamingId,
+                role: "assistant",
+                text: "",
+                createdAt: new Date().toISOString()
+              })
+            ];
         this.setData({
-          chatItems: this.data.chatItems.map((item) =>
+          chatItems: baseItems.map((item) =>
             item.id === streamingId && item.kind === "message"
               ? { ...item, text: item.text + toAdd }
               : item
@@ -345,6 +455,19 @@ Page({
         conversationId,
         content,
         (delta) => {
+          if (hasImageInput) {
+            const visionDelta = formatVisionDelta(delta);
+            if (visionDelta) {
+              if (delta.type === "vision_status" || delta.type === "progress") {
+                if (!visionTextBuffer) setVisionText(visionDelta);
+                return;
+              }
+              clearVisionProgress();
+              visionTextBuffer += visionDelta;
+              setVisionText(visionTextBuffer);
+              return;
+            }
+          }
           if (delta.type === "text" && delta.text) {
             pendingText += delta.text;
             if (!flushTimer) {
@@ -357,14 +480,21 @@ Page({
         },
         (data) => {
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+          clearVisionProgress();
+          flushText();
           const responseNow = new Date().toISOString();
-          let nextItems = this.data.chatItems.filter((item) => item.id !== streamingId);
-          const visionText = visionTextFromContent(data.normalized_content as any);
+          let nextItems = this.data.chatItems.filter(
+            (item) => item.id !== streamingId && item.id !== visionStreamId
+          );
+          const visionText =
+            visionTextFromContent(data.normalized_content as any) || visionTextBuffer.trim();
           if (visionText) {
             nextItems.push({
               kind: "vision_reasoning",
               id: `${data.message_id}_vision`,
               text: visionText,
+              stage: "图片理解完成",
+              streaming: false,
               createdAt: responseNow
             });
           }
@@ -412,7 +542,12 @@ Page({
               }
             }
           }
-          this.setData({ chatItems: nextItems, sending: false, streamingActive: false, summaryPending: data.summary_pending === true });
+          this.setData({
+            chatItems: nextItems,
+            sending: false,
+            streamingActive: false,
+            summaryPending: data.summary_pending === true
+          });
           if (data.committed_records?.length) {
             wx.showToast({ title: "已保存", icon: "success" });
           }
@@ -424,14 +559,16 @@ Page({
         },
         (error) => {
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-          this._removeChatItem(streamingId);
+          clearVisionProgress();
+          this._removeChatItems([streamingId, visionStreamId]);
           this.setData({ sending: false, streamingActive: false });
           showApiError(error);
         },
         () => {
           // SSE 未送达（微信 enableChunked 下 onChunkReceived 未触发），从服务端拉取最新结果
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-          this._removeChatItem(streamingId);
+          clearVisionProgress();
+          this._removeChatItems([streamingId, visionStreamId]);
           this.setData({ sending: false, streamingActive: false });
           this.refreshConversation(conversationId);
         }
@@ -753,6 +890,14 @@ Page({
   _removeChatItem(itemId: string) {
     this.setData({
       chatItems: this.data.chatItems.filter((item) => item.id !== itemId)
+    });
+  },
+
+  _removeChatItems(itemIds: string[]) {
+    const removeIds = new Set(itemIds.filter(Boolean));
+    if (!removeIds.size) return;
+    this.setData({
+      chatItems: this.data.chatItems.filter((item) => !removeIds.has(item.id))
     });
   },
 

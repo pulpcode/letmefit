@@ -37,6 +37,9 @@ class FakeConversationService:
         response = {
             "message_id": "msg_user",
             "assistant_message_id": "msg_assistant",
+            "normalized_content": [
+                item.model_dump(mode="json", exclude_none=True) for item in payload.content
+            ],
             "assistant_text": "我先整理成一条餐食记录草稿，请确认或修改后再保存。",
             "intent": "fitness_record",
             "requires_review": True,
@@ -51,6 +54,14 @@ class FakeConversationService:
                 }
             ],
         }
+        if payload.content[0].type == "image":
+            response["normalized_content"].append(
+                {
+                    "type": "text",
+                    "text": "图片理解: 图片中可能是一份鸡胸肉沙拉，需要用户确认份量。",
+                    "source": "vision",
+                }
+            )
         if payload.include_debug_context:
             response["debug_context"] = {
                 "provider": "mock",
@@ -68,6 +79,33 @@ class FakeConversationService:
                 {"event": "final_answer"},
             ]
         return response
+
+    def send_message_stream_events(
+        self,
+        user_id: str,
+        conversation_id: str,
+        payload: MessageCreateRequest,
+    ):
+        yield ("delta", {"type": "thinking", "stage": "received"})
+        response = self.send_message(user_id, conversation_id, payload)
+        for part in response.get("normalized_content", []):
+            if (
+                part.get("type") == "text"
+                and part.get("source") == "vision"
+                and part.get("text")
+            ):
+                yield (
+                    "delta",
+                    {
+                        "type": "vision",
+                        "stage": "image_understanding",
+                        "text": part["text"].replace("图片理解:", "", 1).strip(),
+                    },
+                )
+        text = response.get("assistant_text") or ""
+        for index in range(0, len(text), 3):
+            yield ("delta", {"type": "text", "text": text[index : index + 3]})
+        yield ("done", response)
 
     def list_messages(self, user_id: str, conversation_id: str) -> dict:
         self.calls.append(("messages", user_id, conversation_id))
@@ -240,6 +278,22 @@ def test_send_message_stream_returns_sse_events() -> None:
     assert '"assistant_message_id": "msg_assistant"' in response.text
     assert service.calls[0] == ("send", "user_test", "conv_test", "text")
     assert service.agent_trace_flags == [True]
+
+
+def test_send_message_stream_emits_vision_delta_before_done() -> None:
+    service = FakeConversationService()
+    client = TestClient(_authorized_app(service))
+
+    response = client.post(
+        "/v1/conversations/conv_test/messages/stream",
+        json={"content": [{"type": "image", "file_id": "file_image", "source": "camera"}]},
+    )
+
+    assert response.status_code == 200
+    assert '"type": "vision"' in response.text
+    assert "图片中可能是一份鸡胸肉沙拉" in response.text
+    assert response.text.index('"type": "vision"') < response.text.index("event: done")
+    assert service.calls[0] == ("send", "user_test", "conv_test", "image")
 
 
 def test_list_messages_and_pending_actions_use_conversation_id() -> None:

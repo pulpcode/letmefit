@@ -417,7 +417,10 @@ Page({
             wx.showToast({ title: "已保存", icon: "success" });
           }
           this.scrollToBottom();
-          this._syncPendingActions(conversationId);
+          // Only sync if stream didn't include pending action data — avoid overwriting correct state
+          if (!(data.pending_actions?.length)) {
+            this._syncPendingActions(conversationId);
+          }
         },
         (error) => {
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -711,7 +714,9 @@ Page({
             wx.showToast({ title: "已保存", icon: "success" });
           }
           this.scrollToBottom();
-          this._syncPendingActions(conversationId);
+          if (!(data.pending_actions?.length)) {
+            this._syncPendingActions(conversationId);
+          }
         },
         (error) => {
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -830,6 +835,13 @@ Page({
 
   // ========== PendingAction ==========
 
+  _pendingActionChanged(fresh: PendingAction, existing: PendingAction): boolean {
+    if (fresh.updated_at !== existing.updated_at) return true;
+    if (fresh.status !== existing.status) return true;
+    if (JSON.stringify(fresh.draft_payload) !== JSON.stringify(existing.draft_payload)) return true;
+    return false;
+  },
+
   _syncPendingActions(conversationId: string) {
     listPendingActions(conversationId)
       .then(pendingData => {
@@ -849,7 +861,7 @@ Page({
             if (!fresh) {
               continue; // committed or discarded — remove
             }
-            if (fresh.updated_at !== item.action.updated_at) {
+            if (this._pendingActionChanged(fresh, item.action)) {
               // Updated — replace with superseded placeholder at original position
               result.push({
                 kind: "pending_action_superseded",
@@ -878,8 +890,8 @@ Page({
           } else {
             const existing = this.data.chatItems.find(
               i => i.kind === "pending_action" && i.id === pa.pending_action_id
-            ) as { action: PendingAction } | undefined;
-            if (existing && pa.updated_at !== existing.action.updated_at) {
+            ) as { kind: "pending_action"; action: PendingAction } | undefined;
+            if (existing && this._pendingActionChanged(pa, existing.action)) {
               // Updated card — float to bottom
               result.push({
                 kind: "pending_action",

@@ -49,7 +49,11 @@ def send_message(
 
 
 def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    def _default(obj):
+        if hasattr(obj, "isoformat"):
+            return obj.isoformat()
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=_default)}\n\n"
 
 
 @router.post("/{conversation_id}/messages/stream")

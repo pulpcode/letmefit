@@ -553,9 +553,9 @@ class ExtractionService:
             "confidence": decimal_to_float(action.confidence),
             "draft_payload": action.draft_payload_json,
             "warnings": action.warnings_json or [],
-            "created_at": action.created_at,
-            "updated_at": action.updated_at,
-            "expires_at": action.expires_at,
+            "created_at": action.created_at.isoformat() if action.created_at else None,
+            "updated_at": action.updated_at.isoformat() if action.updated_at else None,
+            "expires_at": action.expires_at.isoformat() if action.expires_at else None,
         }
 
     def _input_types(self, content: list[MessageContentItem]) -> list[str]:

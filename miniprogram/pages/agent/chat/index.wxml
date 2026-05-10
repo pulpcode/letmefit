@@ -76,7 +76,7 @@
           <pending-action-card action="{{item.action}}" bind:confirm="onConfirmAction" bind:discard="onDiscardAction" bind:edit="onEditAction" />
         </view>
         <view wx:elif="{{item.kind === 'pending_action_superseded'}}" class="superseded-wrap">
-          <text class="superseded-text">草稿已更新</text>
+          <text class="superseded-text">卡片信息已更新</text>
         </view>
       </block>
 

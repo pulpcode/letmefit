@@ -867,7 +867,7 @@
         }
       }
 
-      async function refreshPendingActions() {
+      async function refreshPendingActions(autoScroll = false) {
         if (!$("conversationId").value) {
           renderPendingActions([]);
           return null;
@@ -879,6 +879,9 @@
           ["pending_confirmation", "needs_clarification"].includes(action.status),
         );
         savePendingActionId(pending?.pending_action_id || "");
+        if (autoScroll && pending) {
+          $("pendingCards").parentElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
         return response;
       }
 
@@ -1260,7 +1263,7 @@
             const action = finalData.pending_actions?.[0];
             if (action) savePendingActionId(action.pending_action_id);
             await refreshMessages();
-            await refreshPendingActions();
+            await refreshPendingActions(true);
           }
         } catch (error) {
           logError(error);

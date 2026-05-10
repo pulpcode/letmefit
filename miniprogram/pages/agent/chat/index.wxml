@@ -30,8 +30,13 @@
       <block wx:for="{{chatItems}}" wx:key="id">
         <view wx:if="{{item.kind === 'message'}}" class="message-row {{item.role === 'user' ? 'user' : 'assistant'}}">
           <image wx:if="{{item.role === 'assistant'}}" class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
-          <view class="bubble">
-            <text>{{item.text}}</text>
+          <view class="bubble {{item.role === 'assistant' && !item.text ? 'typing-bubble' : ''}}">
+            <block wx:if="{{item.role === 'assistant' && !item.text}}">
+              <view class="typing-dot"></view>
+              <view class="typing-dot"></view>
+              <view class="typing-dot"></view>
+            </block>
+            <text wx:else>{{item.text}}</text>
           </view>
         </view>
         <view wx:elif="{{item.kind === 'pending_action'}}" class="pending-wrap">
@@ -47,8 +52,8 @@
         <text class="summary-pending-text">历史对话整理中…</text>
       </view>
 
-      <!-- 发送中动态指示 -->
-      <view wx:if="{{sending}}" class="message-row assistant">
+      <!-- 发送中动态指示（仅在无流式气泡时显示，如语音识别等待期） -->
+      <view wx:if="{{sending && !streamingActive}}" class="message-row assistant">
         <image class="bubble-avatar" src="{{avatarSrc}}" mode="aspectFill" />
         <view class="bubble typing-bubble">
           <view class="typing-dot"></view>

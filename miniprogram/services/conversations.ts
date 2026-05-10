@@ -65,6 +65,10 @@ export function sendMessageStream(
     header.Authorization = `Bearer ${tokens.access_token}`;
   }
   const parser = new SSEParser();
+  let doneCalled = false;
+  const handleDone = (data: SendMessageResponse) => {
+    if (!doneCalled) { doneCalled = true; onDone(data); }
+  };
   const task = wx.request({
     url: `${getApiBaseUrl()}/conversations/${conversationId}/messages/stream`,
     method: "POST",
@@ -74,6 +78,29 @@ export function sendMessageStream(
     success: (res: any) => {
       if (res.statusCode >= 400) {
         onError(new Error("请求失败"));
+        return;
+      }
+      // 兜底：onChunkReceived 在某些微信版本/网络环境下可能未触发，
+      // success.data 包含完整响应体，从中解析 SSE 事件。
+      if (!doneCalled && res.data) {
+        const sseText: string = typeof res.data === "string"
+          ? res.data
+          : new TextDecoder().decode(res.data as ArrayBuffer);
+        for (const block of sseText.split("\n\n")) {
+          let event = "message";
+          let data = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) event = line.slice(7).trim();
+            else if (line.startsWith("data: ")) data = line.slice(6).trim();
+          }
+          if (!data) continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (event === "delta") onDelta(parsed);
+            else if (event === "done") { handleDone(parsed as SendMessageResponse); break; }
+            else if (event === "error") { onError(new Error(parsed.message || "未知错误")); break; }
+          } catch (_) {}
+        }
       }
     },
     fail: () => onError(new Error("网络不可用")),
@@ -83,7 +110,7 @@ export function sendMessageStream(
       try {
         const parsed = JSON.parse(data);
         if (event === "delta") onDelta(parsed);
-        else if (event === "done") onDone(parsed as SendMessageResponse);
+        else if (event === "done") handleDone(parsed as SendMessageResponse);
         else if (event === "error") onError(new Error(parsed.message || "未知错误"));
       } catch (_) {}
     }

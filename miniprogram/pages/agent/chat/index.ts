@@ -68,6 +68,7 @@ Page({
     avatar: "female",
     avatarSrc: "/assets/female-fit-agent.png",
     sending: false,
+    streamingActive: false,
     summaryPending: false,
     recording: false,
     voiceRemain: VOICE_MAX_SECONDS,
@@ -227,6 +228,7 @@ Page({
       };
       this.setData({
         sending: true,
+        streamingActive: true,
         chatItems: [...this.data.chatItems, localUserItem, streamingItem]
       });
       this.scrollToBottom();
@@ -285,7 +287,7 @@ Page({
               });
             }
           }
-          this.setData({ chatItems: nextItems, sending: false, summaryPending: data.summary_pending === true });
+          this.setData({ chatItems: nextItems, sending: false, streamingActive: false, summaryPending: data.summary_pending === true });
           if (data.committed_records?.length) {
             wx.showToast({ title: "已保存", icon: "success" });
           }
@@ -295,7 +297,7 @@ Page({
         (error) => {
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
           this._removeChatItem(streamingId);
-          this.setData({ sending: false });
+          this.setData({ sending: false, streamingActive: false });
           showApiError(error);
         }
       );
@@ -468,6 +470,7 @@ Page({
       const streamingId = `streaming_voice_${Date.now()}`;
       const streamingNow = new Date().toISOString();
       this.setData({
+        streamingActive: true,
         chatItems: [...this.data.chatItems, {
           kind: "message",
           id: streamingId,
@@ -531,7 +534,7 @@ Page({
               });
             }
           }
-          this.setData({ chatItems: nextItems, sending: false, summaryPending: data.summary_pending === true });
+          this.setData({ chatItems: nextItems, sending: false, streamingActive: false, summaryPending: data.summary_pending === true });
           if (data.committed_records?.length) {
             wx.showToast({ title: "已保存", icon: "success" });
           }
@@ -541,7 +544,7 @@ Page({
         (error) => {
           if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
           this._removeChatItem(streamingId);
-          this.setData({ sending: false });
+          this.setData({ sending: false, streamingActive: false });
           showApiError(error);
         }
       );
@@ -551,7 +554,7 @@ Page({
         this._removeChatItem(localUserItem.id);
       }
       showApiError(error);
-      this.setData({ sending: false });
+      this.setData({ sending: false, streamingActive: false });
     }
   },
 

@@ -220,6 +220,28 @@ def test_send_message_can_request_agent_trace() -> None:
     assert service.agent_trace_flags == [True]
 
 
+def test_send_message_stream_returns_sse_events() -> None:
+    service = FakeConversationService()
+    client = TestClient(_authorized_app(service))
+
+    response = client.post(
+        "/v1/conversations/conv_test/messages/stream",
+        json={
+            "content": [{"type": "text", "text": "今天吃了什么？"}],
+            "include_agent_trace": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache, no-transform"
+    assert "event: delta" in response.text
+    assert "event: done" in response.text
+    assert '"assistant_message_id": "msg_assistant"' in response.text
+    assert service.calls[0] == ("send", "user_test", "conv_test", "text")
+    assert service.agent_trace_flags == [True]
+
+
 def test_list_messages_and_pending_actions_use_conversation_id() -> None:
     conversation_service = FakeConversationService()
     pending_action_service = FakePendingActionService()

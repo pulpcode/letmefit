@@ -382,7 +382,7 @@ class ExtractionService:
                         draft_payload=draft_payload,
                         user_note=tool_call.arguments.get("user_note"),
                     ),
-                    commit=False,
+                    commit=True,
                 )
             except AppError as exc:
                 return {
@@ -398,7 +398,7 @@ class ExtractionService:
                 data=updated_action,
             )
             tool_result["pending_action_id"] = pending_action_id
-            return {"pending_action": updated_action, "tool_result": tool_result}
+            return {"pending_actions": [updated_action], "tool_result": tool_result}
 
         if tool_call.name == "discard_pending_actions":
             pending_action_ids = self._pending_action_ids_from_tool_call(tool_call)

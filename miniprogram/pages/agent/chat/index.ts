@@ -376,14 +376,40 @@ Page({
               createdAt: responseNow
             }));
           }
+          const existingPendingMap = new Map<string, ChatItem>(
+            this.data.chatItems
+              .filter(i => i.kind === "pending_action")
+              .map(i => [i.id, i as ChatItem])
+          );
           for (const pa of data.pending_actions || []) {
             if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
-              nextItems.push({
-                kind: "pending_action",
-                id: pa.pending_action_id,
-                action: pa,
-                createdAt: pa.created_at || responseNow
-              });
+              if (existingPendingMap.has(pa.pending_action_id)) {
+                const oldIdx = nextItems.findIndex(
+                  i => i.id === pa.pending_action_id && i.kind === "pending_action"
+                );
+                if (oldIdx !== -1) {
+                  const old = nextItems[oldIdx];
+                  nextItems[oldIdx] = {
+                    kind: "pending_action_superseded",
+                    id: "superseded-" + pa.pending_action_id,
+                    pendingActionId: pa.pending_action_id,
+                    createdAt: old.createdAt,
+                  };
+                }
+                nextItems.push({
+                  kind: "pending_action",
+                  id: pa.pending_action_id,
+                  action: pa,
+                  createdAt: responseNow,
+                });
+              } else {
+                nextItems.push({
+                  kind: "pending_action",
+                  id: pa.pending_action_id,
+                  action: pa,
+                  createdAt: pa.created_at || responseNow,
+                });
+              }
             }
           }
           this.setData({ chatItems: nextItems, sending: false, streamingActive: false, summaryPending: data.summary_pending === true });
@@ -644,14 +670,40 @@ Page({
               createdAt: responseNow
             }));
           }
+          const existingPendingMap = new Map<string, ChatItem>(
+            this.data.chatItems
+              .filter(i => i.kind === "pending_action")
+              .map(i => [i.id, i as ChatItem])
+          );
           for (const pa of data.pending_actions || []) {
             if (pa.status === "pending_confirmation" || pa.status === "needs_clarification") {
-              nextItems.push({
-                kind: "pending_action",
-                id: pa.pending_action_id,
-                action: pa,
-                createdAt: pa.created_at || responseNow
-              });
+              if (existingPendingMap.has(pa.pending_action_id)) {
+                const oldIdx = nextItems.findIndex(
+                  i => i.id === pa.pending_action_id && i.kind === "pending_action"
+                );
+                if (oldIdx !== -1) {
+                  const old = nextItems[oldIdx];
+                  nextItems[oldIdx] = {
+                    kind: "pending_action_superseded",
+                    id: "superseded-" + pa.pending_action_id,
+                    pendingActionId: pa.pending_action_id,
+                    createdAt: old.createdAt,
+                  };
+                }
+                nextItems.push({
+                  kind: "pending_action",
+                  id: pa.pending_action_id,
+                  action: pa,
+                  createdAt: responseNow,
+                });
+              } else {
+                nextItems.push({
+                  kind: "pending_action",
+                  id: pa.pending_action_id,
+                  action: pa,
+                  createdAt: pa.created_at || responseNow,
+                });
+              }
             }
           }
           this.setData({ chatItems: nextItems, sending: false, streamingActive: false, summaryPending: data.summary_pending === true });

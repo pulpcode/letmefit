@@ -14,6 +14,7 @@ class PendingActionAgentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     include_agent_trace: bool = False
+    include_debug_context: bool = False
 
 
 class PendingActionResponse(BaseModel):

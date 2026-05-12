@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.agent_runtime import AgentRuntime
 from app.ai.draft_normalizer import normalize_pending_action_draft
+from app.ai.prompt_payload import build_extraction_user_prompt_payload
+from app.ai.types import ExtractionInput
 from app.auth.security import new_id, utc_now
 from app.core.database import get_db
 from app.core.errors import AppError
@@ -173,6 +175,7 @@ class PendingActionService:
             observation=observation,
             event_message_id=event_message_id,
             include_agent_trace=payload.include_agent_trace,
+            include_debug_context=payload.include_debug_context,
         )
         if continuation is not None:
             response["continuation"] = continuation
@@ -210,6 +213,7 @@ class PendingActionService:
             observation=observation,
             event_message_id=event_message_id,
             include_agent_trace=payload.include_agent_trace,
+            include_debug_context=payload.include_debug_context,
         )
         if continuation is not None:
             response["continuation"] = continuation
@@ -455,6 +459,7 @@ class PendingActionService:
         observation: dict[str, Any],
         event_message_id: str,
         include_agent_trace: bool,
+        include_debug_context: bool = False,
     ) -> dict[str, Any] | None:
         try:
             self._get_owned_conversation(action.user_id, action.conversation_id)
@@ -471,7 +476,8 @@ class PendingActionService:
                     source="pending_action_observation",
                 )
             ]
-            result = AgentRuntime(self.db).run(
+            runtime = AgentRuntime(self.db)
+            result = runtime.run(
                 user_id=action.user_id,
                 conversation_id=action.conversation_id,
                 message_id=event_message_id,
@@ -503,6 +509,16 @@ class PendingActionService:
             }
             if include_agent_trace:
                 response["agent_trace"] = result.get("agent_trace", [])
+            if include_debug_context:
+                response["debug_context"] = self._build_continuation_debug_context(
+                    runtime=runtime,
+                    user_id=action.user_id,
+                    conversation_id=action.conversation_id,
+                    message_id=event_message_id,
+                    content=content,
+                    context=context,
+                    result=result,
+                )
             return response
         except AppError as exc:
             logger.warning(
@@ -511,6 +527,42 @@ class PendingActionService:
                 exc.code,
             )
             return None
+
+    def _build_continuation_debug_context(
+        self,
+        *,
+        runtime: AgentRuntime,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+        content: list[MessageContentItem],
+        context: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        extraction_input = ExtractionInput(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            content=content,
+            context=context,
+        )
+        llm_model_outputs = result.get("debug_model_outputs", [])
+        return {
+            "provider": runtime.provider.provider_name,
+            "normalized_content": [
+                item.model_dump(mode="json", exclude_none=True) for item in content
+            ],
+            "conversation_context": context,
+            "llm_request_body": runtime.provider.last_debug_request_body(),
+            "llm_response_body": runtime.provider.last_debug_response_body(),
+            "llm_user_prompt_payload": build_extraction_user_prompt_payload(extraction_input),
+            "llm_model_outputs": llm_model_outputs,
+            "llm_tool_calls": [
+                {"model_turn": output.get("model_turn"), **tool_call}
+                for output in llm_model_outputs
+                for tool_call in (output.get("tool_calls") or [])
+            ],
+        }
 
     def _add_action_event(
         self,

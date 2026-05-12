@@ -74,6 +74,7 @@ class ExtractionToolCall:
     confidence: Decimal | None = None
     grounding: ActionGrounding | None = None
     warnings: list[dict[str, Any]] = field(default_factory=list)
+    tool_call_id: str | None = None
 
     def to_action_spec(self) -> ExtractionActionSpec:
         return ExtractionActionSpec(

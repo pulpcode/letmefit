@@ -410,15 +410,16 @@ class ExtractionService:
         if tool_call.name == "discard_pending_actions":
             pending_action_ids = self._pending_action_ids_from_tool_call(tool_call)
             result = service.discard_actions_for_agent(user_id, pending_action_ids)
-            return {
-                "tool_result": {
-                    "tool_name": tool_call.name,
-                    "action_type": tool_call.action_type,
-                    "status": "discarded" if not result["failed"] else "partial_discarded",
-                    "discarded": result["discarded"],
-                    "failed": result["failed"],
-                }
+            tool_result: dict[str, Any] = {
+                "tool_name": tool_call.name,
+                "action_type": tool_call.action_type,
+                "status": "discarded" if not result["failed"] else "partial_discarded",
+                "discarded": result["discarded"],
+                "failed": result["failed"],
             }
+            if tool_call.tool_call_id:
+                tool_result["tool_call_id"] = tool_call.tool_call_id
+            return {"tool_result": tool_result}
 
         return {
             "tool_result": self._tool_result(
@@ -472,11 +473,13 @@ class ExtractionService:
         record: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        result = {
+        result: dict[str, Any] = {
             "tool_name": tool_call.name,
             "action_type": tool_call.action_type,
             "status": status,
         }
+        if tool_call.tool_call_id:
+            result["tool_call_id"] = tool_call.tool_call_id
         if reason:
             result["reason"] = reason
         if action is not None:

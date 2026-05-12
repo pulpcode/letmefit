@@ -81,6 +81,9 @@ class MockExtractionProvider(ExtractionProvider):
             tool_calls.append(self._body_metric_tool_call(lowered, text))
         return tool_calls
 
+    def _mock_tool_call_id(self, name: str) -> str:
+        return f"mock_call_{name}"
+
     def _meal_tool_call(
         self,
         text: str,
@@ -129,6 +132,7 @@ class MockExtractionProvider(ExtractionProvider):
             },
             grounding=self._grounding(evidence_text),
             warnings=warnings,
+            tool_call_id=self._mock_tool_call_id("propose_meal_record"),
         )
 
     def _body_metric_tool_call(self, text: str, evidence_text: str) -> ExtractionToolCall:
@@ -151,6 +155,7 @@ class MockExtractionProvider(ExtractionProvider):
             arguments=draft_payload,
             grounding=self._grounding(evidence_text),
             warnings=warnings,
+            tool_call_id=self._mock_tool_call_id("propose_body_metric_record"),
         )
 
     def _grounding(self, evidence_text: str) -> ActionGrounding | None:

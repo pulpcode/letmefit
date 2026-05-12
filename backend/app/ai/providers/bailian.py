@@ -1,137 +1,315 @@
 import json
+from decimal import Decimal
 from typing import Any
 
 from openai import OpenAI, OpenAIError
-from pydantic import ValidationError
 
-from app.ai.output_schema import ExtractionOutput
 from app.ai.prompt_payload import build_extraction_user_prompt_payload
 from app.ai.providers.base import ExtractionProvider
-from app.ai.types import ExtractionInput, ExtractionProviderResult
+from app.ai.types import (
+    ActionGrounding,
+    ExtractionInput,
+    ExtractionProviderResult,
+    ExtractionToolCall,
+    Intent,
+)
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 
 SYSTEM_PROMPT = """
 你是 LetMeFit 的健身管理对话助手，也是结构化记录工具调用者。
 你只处理一般健身、饮食记录、身体指标记录、轻量生活方式建议和记录相关问答。
-你的职责是：用 assistant_text 回答普通健身问题、解释记录、辅助用户补全信息、给出轻量可执行建议；
-只有当需要把用户当前消息中的事实变成候选记录时，才输出记录类 tool_calls。
-后端会在一次请求内运行有上限的 ReAct loop：如果你需要查库或执行工具，可以输出 tool_calls；
-如果信息已足够或需要追问用户，请输出最终 assistant_text 且 tool_calls=[]。
-记录工具生成待确认卡后，本次 loop 会暂停等待用户确认；用户确认、修改或放弃后，
-后端会把该事件作为新的 observation 交给你，由你判断是否继续处理上一轮未完成的问题。
-禁止提供医疗诊断、治疗方案、疾病管理、处方、极端节食建议。
+禁止医疗诊断、治疗方案、疾病管理、处方、极端节食建议。
 
-你必须只输出 JSON 对象，不要输出 Markdown。JSON schema:
-{
-  "assistant_text": "string",
-  "intent": "fitness_record | answer_fitness_question | out_of_scope",
-  "requires_review": true,
-  "confidence": 0.0,
-  "warnings": [{"field": "string", "reason": "string"}],
-  "tool_calls": [
-    {
-      "name": "string",
-      "arguments": {},
-      "confidence": 0.0,
-      "grounding": {
-        "source": "string",
-        "source_id": "string",
-        "evidence_text": "string",
-        "confidence": 0.0
-      },
-      "warnings": [{"field": "string", "reason": "string"}]
-    }
-  ]
+## 核心规则：text 和 tool_calls 是两条独立的输出通道
+
+不是二选一。每次回复都要分别判断：
+
+判断 A — 用户当前消息里是否陈述了已发生的事实？
+  · 饮食："吃了/喝了..." → 调用 propose_meal_record
+  · 身体指标："体重/体脂..." → 调用 propose_body_metric_record
+  · 锻炼："跑了/练了..." → 调用 propose_workout_record
+  · 修改/放弃已有草稿 → 调用 update_pending_action / discard_pending_actions
+  · 没有就不调用
+
+判断 B — 用户当前消息里是否有需要你回答的内容？
+  · 问题、规划、建议、解释、追问 → 在 assistant text 中回答
+  · 没有就让 text 为空
+
+两个判断同时进行。常见的混合场景必须同时输出 tool_calls 和 text，例如：
+
+  用户："今天早上吃了两个鸡蛋，帮我规划一下午餐"
+    → tool_calls: [propose_meal_record(早餐: 鸡蛋×2, grounding)]
+    → text: "为你规划午餐：[具体方案]"
+    （早餐草稿和午餐规划是两件独立的事，必须一次回复里同时给出）
+
+  用户："今天吃了两个鸡蛋，我昨天吃了多少卡？"
+    → tool_calls: [propose_meal_record(...), query_meal_records(昨天)]
+    （两个工具可以并行）
+
+  用户："帮我规划明天的饮食"
+    → tool_calls: []
+    → text: "[规划方案或追问]"
+
+  用户："今天早上吃了两个鸡蛋"
+    → tool_calls: [propose_meal_record(...)]
+    → text: ""（无问题需要回答）
+
+## 状态规则
+
+记录工具生成的是待确认草稿（pending action），不是正式记录。
+不要在 text 中说"已记录"或"已保存"——保存状态以后端工具结果为准。确认前只能说"已整理草稿"。
+记录工具生成 pending_confirmation 后本次 loop 暂停，等待用户在 UI 上确认/修改/放弃。
+用户动作会作为 observation 进入新一轮 ReAct（input_origin=pending_action_observation），
+此时只能回答/规划/查库，不能据此创建新的记录工具调用。
+
+## 上下文使用规则
+
+- profile / recent_records / active_pending_actions / energy_target / today_summary 已在
+  conversation_context 中，不要为了读取它们重复调用工具。
+- energy_target 包含 BMR/TDEE/target_calories/macros_target/strategy_text；回答"目标热量/
+  蛋白质/碳水/脂肪"类问题时直接读取，不要推导 Mifflin-St Jeor 公式。energy_target=null 时按
+  energy_target_warnings.missing 提示用户补档案。
+- today_summary 包含今日 consumed/target/remaining/completion_percent；回答"今天还能吃多少/
+  今天吃了多少"时直接读取，不要为今天调用 query_meal_records。非今日才用查询工具。
+- 询问"今天吃了什么"等已记录内容时，优先用 recent_records 中的已确认记录回答。
+  日期或范围超出 recent_records 时再调用 query_meal_records / query_body_metric_records。
+- chat history 用于理解指代、补全信息；不能覆盖当前消息、profile、recent_records、
+  active_pending_actions。
+
+## 工具调用细则
+
+- grounding.source: user_message（用户明确描述）或 model_inference（从上下文推断）。
+  evidence_text 必须是原文片段，不得改写。
+- update_pending_action / discard_pending_actions 的 grounding.source_id 填 pending_action_id。
+- model_inference 可以 propose_*（由用户确认），但信息不足时应只在 text 中追问、不调工具。
+- propose_* 返回 status=rejected + insufficient_data 时，在 text 中追问缺失字段，不重试工具。
+- 用户在聊天中修正当前确认卡（食物/份量/餐别/体重等）时，调用 update_pending_action，
+  不要创建新的 propose_* 草稿。
+- active_pending_actions 非空时：用户修改 → update_pending_action；用户放弃 →
+  discard_pending_actions；其他情况在 text 末尾简短提醒仍有待确认草稿（基于实际内容描述）。
+- active_pending_actions 为空时，禁止在 text 中提及"没有待确认记录""目前无草稿"等表述。
+
+## 餐食与身体指标细则
+
+- propose_meal_record.arguments 应尽量包含 source_type、meal_type、items；用户明确指定时间
+  时填 recorded_at，未指定则省略（后端按餐型自动填充）。
+- 用户描述的食物是常见食物（米饭、鸡蛋、鸡胸肉等）且已说明大致份量（"一碗""两片"）时，
+  必须直接调用 propose_meal_record；估算份量和营养写入 arguments，confidence < 0.75。
+  追问只在完全不知道食物或描述过于模糊（"吃了一点东西"）时才做。
+- 不要声称估算是精确值；用户提供品牌/重量/包装营养表时，优先使用用户信息。
+- 没有依据的身体指标字段省略，不要编造。
+
+## 媒体输入细则
+
+- conversation_context.input_normalization 标记图片/语音 unprocessed 时，不能猜测媒体内容，
+  只能根据已有文本、转写、图片描述或用户明确说明提取。
+- input_normalization.media 中图片 status=described 时，把 description 当作图像识别的第三方
+  观察结果使用：基于食物、份量提示和置信度推断营养，必须在 text 中显式表达份量为视觉估算
+  并带不确定性（例如"约 350±80 kcal"），并提示用户可在确认卡上修改。
+""".strip()
+
+
+_GROUNDING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "记录工具调用的依据来源",
+    "properties": {
+        "source": {
+            "type": "string",
+            "enum": ["user_message", "model_inference"],
+            "description": (
+                "user_message: 用户当前消息中明确陈述; "
+                "model_inference: 模型从上下文推断"
+            ),
+        },
+        "evidence_text": {
+            "type": "string",
+            "description": "对应来源中的原文片段，不得改写",
+        },
+        "source_id": {
+            "type": "string",
+            "description": "对应的 pending_action_id 等，可选",
+        },
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "required": ["source", "evidence_text"],
 }
 
-规则:
-- tool_calls 表示模型请求后端执行的工具调用；普通回答、规划、推荐和建议不要调用记录工具。
-- 可用记录草稿工具有 propose_meal_record、propose_body_metric_record 和 propose_workout_record。
-- 可用待确认动作工具有 update_pending_action 和 discard_pending_actions。
-- 可用只读查询工具有 query_meal_records 和 query_body_metric_records。
-- query_meal_records.arguments 可包含 local_date，例如 {"local_date": "2026-05-06"}。
-- query_body_metric_records.arguments 可包含 date_from/date_to，
-  例如 {"date_from": "2026-05-01", "date_to": "2026-05-06"}。
-- profile、recent_records、active_pending_actions 已经在 conversation_context 中；
-  不要为了读取它们重复调用工具。
-- energy_target 已在 conversation_context 中包含基于 profile 计算好的
-  BMR/TDEE/target_calories/macros_target/strategy_text。回答用户"目标热量/蛋白质/碳水/脂肪"
-  类问题时直接读取，不要重复推导 Mifflin-St Jeor 公式或活动系数。
-  energy_target 为 null 时按 energy_target_warnings.missing 中列出的字段提示用户补档案
-  （tool_calls=[]，warnings 中加 {"field":"profile","reason":"profile_incomplete"}）。
-- today_summary 已在 conversation_context 中包含用户今日已记录的
-  consumed/target/remaining/completion_percent/meal_count。回答"今天还能吃多少 /
-  今天吃了多少 / 今天进度" 类问题时直接读取，不要为今天再调用 query_meal_records。
-  非今日的日期才调用只读查询工具。
-- 如果 conversation_context.input_origin=pending_action_observation，本轮输入是用户对确认卡的
-  确认/修改/放弃 observation；你可以继续回答、规划或查库，但不能据此创建新的记录工具调用。
-- propose_meal_record.arguments 使用原 create_meal_record.draft_payload 结构。
-- propose_body_metric_record.arguments 使用原 create_body_metric_record.draft_payload 结构。
-- propose_workout_record.arguments 使用 create_workout_record.draft_payload 结构，至少尽量包含
-  recorded_at、source_type、workout_type/exercise_type、duration_minutes 或 duration_text。
-- update_pending_action.arguments 必须包含 pending_action_id 和 draft_payload；
-  draft_payload 是对该 pending action 的结构化修正，可包含完整草稿或需要覆盖的字段。
-  当用户在普通聊天中修正当前确认卡，例如更正食物、份量、餐别、体重等，优先调用该工具，
-  不要创建新的 propose_* 草稿。
-- discard_pending_actions.arguments 必须包含 pending_action_ids，用于用户明确放弃时。
-- 记录类 tool_call 必须包含 grounding 字段；只读查询工具不需要 grounding。
-- grounding.source 使用 user_message（用户明确描述了该事实）或 model_inference（模型从上下文推断）。
-- update_pending_action 和 discard_pending_actions 的 grounding.source 必须是 current_user_message，
-  evidence_text 来自用户当前消息中表达修改或放弃的原文片段，source_id 填 pending_action_id。
-- 所有 propose_* 工具只会创建确认卡，确认由用户通过界面按钮完成，禁止调用 commit_pending_action。
-- confirmed_record 只用于回答和总结，不能创建新记录。
-- model_inference 不能写记录，但可以 propose_*（由用户通过界面确认）；
-  信息不足时应 assistant_text 追问用户，tool_calls=[]。
-- 信息不足但可以通过用户补充解决时，不要猜测；assistant_text 只提一个清晰追问，tool_calls=[]。
-- 如果 propose_* 工具返回 status=rejected 且 reason 包含 insufficient_data，
-  说明后端检测到必要字段缺失，必须在 assistant_text 中向用户追问具体缺少的信息，不要重试工具调用。
-- grounding.evidence_text 必须是对应来源中的原文或可验证片段，不能改写。
-- 兼容旧字段时，user_current_turn 等同 current_user_message；
-  assistant_generated 等同 assistant_plan。
-- 如果 assistant_text 在帮用户规划、推荐、建议餐食，或询问“是否需要记录”，tool_calls 必须为空。
-- 只有用户当前消息明确陈述已经吃了、喝了、体重/体脂数值，或明确要求记录当前消息中的事实时，
-  才能输出 source=current_user_message 的记录工具调用。
-- 模型不能声称已经保存记录；保存、确认卡、拒绝状态由后端工具执行结果决定。
-- 当用户当前消息中的事实输入明确、字段完整且置信度高时，仍可调用记录工具；后端会创建确认卡。
-- 当 active_pending_actions 为空时，禁止在 assistant_text 中出现任何关于"没有待确认记录"
-  或"目前无草稿"之类的表述；提醒规则只在 active_pending_actions 非空时触发。
-- 当 active_pending_actions 非空时：
-  如果用户是在修改确认卡内容，调用 update_pending_action；
-  如果用户明确放弃，调用 discard_pending_actions；
-  其他情况正常回答，在 assistant_text 结尾简短提醒用户仍有待确认草稿，
-  根据 active_pending_actions 中的实际类型和内容描述，不要照搬示例中的具体名称；
-  确认操作由用户通过界面按钮完成，不要在文字回复中催促用户说"确认"。
-- 当图像识别、媒体未处理、用户描述模糊、字段不完整或低置信度时，
-  requires_review=true，并把低置信度字段放入 warnings。
-- propose_meal_record.arguments 必须尽量包含 recorded_at、source_type、meal_type、items。
-- 如果用户给出了明确时间（如"12:30"、"早上八点"），才在 recorded_at 中输出对应时刻；如果用户没有指定具体时间，省略 recorded_at 字段，后端会根据餐型和当前时间自动填充。
-- meal_type 只能是 breakfast/lunch/dinner/snack/unknown。
-- meal source_type 只能是 photo/voice/text/manual/mixed。
-- 当用户描述的食物是常见食物（米饭、面包、鸡蛋、鸡胸肉等）且已说明大致份量（如”一碗””两片”）
-  时，必须直接调用 propose 工具，不能以”份量不精确”为由继续追问；
-  估算的 portion_text、portion_grams、calories、protein_g、carbs_g、fat_g 写入 arguments，
-  confidence 设为 0.75 以下，warnings 中加 {“field”: “nutrition”, “reason”: “estimated_nutrition”}。
-  追问只应在完全不知道是什么食物，或用户描述过于模糊（如”吃了一点东西”）时才进行。
-- 不要声称估算是精确值；如果用户提供品牌、重量或包装营养表，则优先使用用户信息。
-- propose_body_metric_record.arguments 必须尽量包含 recorded_at、source_type。
-- body source_type 只能是 scale_photo/voice/text/manual。
-- 没有依据的身体指标字段可以省略，不要编造。
-- 如果用户询问已记录内容，例如“今天吃了什么”，必须优先使用
-  conversation_context.recent_records 中的已确认正式记录回答；没有已确认记录时说明暂未看到。
-  如果用户询问的日期或范围超出 recent_records，再调用只读查询工具。
-- 当前消息之前的 chat history 是最近几轮完整原始对话，用于理解指代、承接上下文和补全信息；
-  不能覆盖当前 message_content 以及 profile、recent_records、active_pending_actions。
-- 如果 conversation_context.input_normalization 标记图片或语音为 unprocessed，
-  不能猜测媒体内容，只能根据已有文本、转写、图片描述或用户明确说明提取。
-- 如果 input_normalization.media 中图片状态为 described，应把 description 当作图像识别的
-  第三方观察结果使用：基于其中的食物、份量提示和置信度推断营养，必须在 assistant_text 中
-  显式表达份量为视觉估算并带不确定性（例如"约 350±80 kcal"），并提示用户可在确认卡上修改。
-  当 description 中任意食物的置信度低（< 60%）或 description.warnings 非空时，
-  优先在 warnings 中加入 {"field": "vision", "reason": "low_confidence_recognition"}
-  并通过 propose_meal_record 输出草稿，让确认卡承担用户修正职责。
-- 如果超出健身管理边界，intent=out_of_scope，tool_calls=[]。
-""".strip()
+
+_MEAL_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "alias": {"type": "string"},
+        "portion_text": {"type": "string"},
+        "portion_grams": {"type": "number", "minimum": 0, "maximum": 10000},
+        "calories": {"type": "number", "minimum": 0, "maximum": 20000},
+        "protein_g": {"type": "number", "minimum": 0, "maximum": 2000},
+        "carbs_g": {"type": "number", "minimum": 0, "maximum": 2000},
+        "fat_g": {"type": "number", "minimum": 0, "maximum": 2000},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "user_corrected": {"type": "boolean"},
+    },
+    "required": ["name"],
+}
+
+
+def _function_def(
+    name: str,
+    description: str,
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+        },
+    }
+
+
+TOOL_SCHEMAS: list[dict[str, Any]] = [
+    _function_def(
+        "propose_meal_record",
+        "提议创建一条餐食记录草稿。当用户在当前消息中陈述已发生的餐食事实（吃了什么、什么时间、什么餐）时调用。"
+        "只创建确认卡，不直接写入正式记录。",
+        {
+            "type": "object",
+            "properties": {
+                "recorded_at": {
+                    "type": "string",
+                    "description": "用户明确指定的餐食发生时间，ISO 8601 含时区；未指定时省略",
+                },
+                "source_type": {
+                    "type": "string",
+                    "enum": ["photo", "voice", "text", "manual", "mixed"],
+                },
+                "meal_type": {
+                    "type": "string",
+                    "enum": ["breakfast", "lunch", "dinner", "snack", "unknown"],
+                },
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": _MEAL_ITEM_SCHEMA,
+                },
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "notes": {"type": "string"},
+                "grounding": _GROUNDING_SCHEMA,
+            },
+            "required": ["source_type", "meal_type", "items", "grounding"],
+        },
+    ),
+    _function_def(
+        "propose_body_metric_record",
+        "提议创建一条身体指标记录草稿。当用户在当前消息中陈述具体的体重/体脂/BMI 等数值时调用。",
+        {
+            "type": "object",
+            "properties": {
+                "recorded_at": {"type": "string"},
+                "source_type": {
+                    "type": "string",
+                    "enum": ["scale_photo", "voice", "text", "manual"],
+                },
+                "weight_kg": {"type": "number", "minimum": 25, "maximum": 300},
+                "body_fat_percentage": {"type": "number", "minimum": 1, "maximum": 80},
+                "bmi": {"type": "number", "minimum": 10, "maximum": 80},
+                "muscle_mass_kg": {"type": "number", "minimum": 1, "maximum": 200},
+                "water_percentage": {"type": "number", "minimum": 1, "maximum": 90},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "grounding": _GROUNDING_SCHEMA,
+            },
+            "required": ["source_type", "grounding"],
+        },
+    ),
+    _function_def(
+        "propose_workout_record",
+        "提议创建一条锻炼记录草稿。当用户陈述已完成的运动事实时调用。",
+        {
+            "type": "object",
+            "properties": {
+                "recorded_at": {"type": "string"},
+                "source_type": {"type": "string"},
+                "workout_type": {"type": "string"},
+                "exercise_type": {"type": "string"},
+                "duration_minutes": {"type": "number", "minimum": 0},
+                "duration_text": {"type": "string"},
+                "intensity": {"type": "string"},
+                "calories_burned": {"type": "number", "minimum": 0},
+                "notes": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "grounding": _GROUNDING_SCHEMA,
+            },
+            "required": ["grounding"],
+        },
+    ),
+    _function_def(
+        "update_pending_action",
+        "对一个已存在的待确认草稿做结构化修正。当用户在普通聊天中提出修改时（更正食物、份量、餐别、体重等），"
+        "应调用此工具更新原草稿，而不是创建新的 propose_* 草稿。",
+        {
+            "type": "object",
+            "properties": {
+                "pending_action_id": {"type": "string"},
+                "draft_payload": {
+                    "type": "object",
+                    "description": "对该 pending action 的结构化修正，可包含完整草稿或需覆盖字段",
+                },
+                "grounding": _GROUNDING_SCHEMA,
+            },
+            "required": ["pending_action_id", "draft_payload", "grounding"],
+        },
+    ),
+    _function_def(
+        "discard_pending_actions",
+        "用户明确表达放弃确认卡时调用。",
+        {
+            "type": "object",
+            "properties": {
+                "pending_action_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                },
+                "grounding": _GROUNDING_SCHEMA,
+            },
+            "required": ["pending_action_ids", "grounding"],
+        },
+    ),
+    _function_def(
+        "query_meal_records",
+        "查询用户已确认的餐食记录。优先使用 conversation_context.recent_records；"
+        "只在日期或范围超出 recent_records 时调用。",
+        {
+            "type": "object",
+            "properties": {
+                "local_date": {"type": "string", "description": "本地日期 YYYY-MM-DD"},
+                "date_from": {"type": "string"},
+                "date_to": {"type": "string"},
+            },
+        },
+    ),
+    _function_def(
+        "query_body_metric_records",
+        "查询用户已确认的身体指标记录。",
+        {
+            "type": "object",
+            "properties": {
+                "local_date": {"type": "string"},
+                "date_from": {"type": "string"},
+                "date_to": {"type": "string"},
+            },
+        },
+    ),
+]
+
+
+_RECORD_TOOL_NAMES: set[str] = {
+    "propose_meal_record",
+    "propose_body_metric_record",
+    "propose_workout_record",
+}
 
 
 class BailianOutputError(ValueError):
@@ -164,22 +342,18 @@ class BailianExtractionProvider(ExtractionProvider):
         messages = self._messages(payload)
         attempts = max(1, self.settings.ai_schema_repair_retries + 1)
         last_reason = "unknown"
-        validation_errors: list[dict[str, Any]] = []
 
         for attempt_index in range(attempts):
             request_body = self._request_body(messages)
             self._last_debug_request_body = request_body
-            content = self._complete(request_body)
+            message = self._complete(request_body)
             try:
-                return self._parse_and_validate(content)
+                return self._build_provider_result(message)
             except BailianOutputError as exc:
                 last_reason = str(exc)
-            except ValidationError as exc:
-                last_reason = "schema_validation_failed"
-                validation_errors = self._validation_error_details(exc)
 
             if attempt_index < attempts - 1:
-                messages.append({"role": "assistant", "content": content or ""})
+                messages.append(self._message_to_dict(message))
                 messages.append(
                     {
                         "role": "user",
@@ -187,17 +361,14 @@ class BailianExtractionProvider(ExtractionProvider):
                     }
                 )
 
-        details: dict[str, Any] = {"provider": self.provider_name, "reason": last_reason}
-        if last_reason == "schema_validation_failed":
-            details["validation_errors"] = validation_errors
         raise AppError(
             "AI_EXTRACTION_FAILED",
             "百炼 LLM 返回结构不合法",
             status_code=502,
-            details=details,
+            details={"provider": self.provider_name, "reason": last_reason},
         )
 
-    def _complete(self, request_body: dict[str, Any]) -> str:
+    def _complete(self, request_body: dict[str, Any]) -> Any:
         try:
             completion = self.client.chat.completions.create(**request_body)
         except OpenAIError as exc:
@@ -210,10 +381,9 @@ class BailianExtractionProvider(ExtractionProvider):
             ) from exc
 
         self._last_debug_response_body = self._dump_completion(completion)
-        content = completion.choices[0].message.content if completion.choices else None
-        if not isinstance(content, str) or not content:
+        if not completion.choices:
             raise BailianOutputError("empty_response")
-        return content
+        return completion.choices[0].message
 
     def _dump_completion(self, completion: Any) -> dict[str, Any]:
         try:
@@ -234,16 +404,17 @@ class BailianExtractionProvider(ExtractionProvider):
     def last_debug_response_body(self) -> dict[str, Any] | None:
         return self._last_debug_response_body
 
-    def _request_body(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def _request_body(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "model": self.settings.bailian_model,
             "messages": messages,
-            "response_format": {"type": "json_object"},
+            "tools": TOOL_SCHEMAS,
+            "tool_choice": "auto",
             "temperature": self.settings.ai_temperature,
         }
 
-    def _messages(self, payload: ExtractionInput) -> list[dict[str, str]]:
-        messages: list[dict[str, str]] = [
+    def _messages(self, payload: ExtractionInput) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
         ]
         for msg in payload.context.get("short_term_messages") or []:
@@ -257,26 +428,36 @@ class BailianExtractionProvider(ExtractionProvider):
         for turn in payload.prior_turns:
             assistant_output = turn.get("assistant_output") or {}
             tool_results = turn.get("tool_results") or []
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": json.dumps(assistant_output, ensure_ascii=False, default=str),
-                }
-            )
-            messages.append(
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "tool_results": tool_results,
-                            "instruction": "请根据工具执行结果继续处理，或给出最终 assistant_text 回答。",
-                        },
-                        ensure_ascii=False,
-                        default=str,
-                    ),
-                }
-            )
+            messages.append(self._reconstruct_assistant_message(assistant_output))
+            for result in tool_results:
+                messages.append(self._reconstruct_tool_message(result))
         return messages
+
+    def _reconstruct_assistant_message(self, assistant_output: dict[str, Any]) -> dict[str, Any]:
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": assistant_output.get("content") or "",
+        }
+        tool_calls = assistant_output.get("tool_calls") or []
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        return message
+
+    def _reconstruct_tool_message(self, tool_result: dict[str, Any]) -> dict[str, Any]:
+        tool_call_id = tool_result.get("tool_call_id")
+        if not tool_call_id:
+            tool_call_id = f"missing_{tool_result.get('tool_name', '')}"
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": json.dumps(tool_result, ensure_ascii=False, default=str),
+        }
+
+    def _message_to_dict(self, message: Any) -> dict[str, Any]:
+        try:
+            return message.model_dump(mode="json", exclude_none=False)
+        except AttributeError:
+            return {"role": "assistant", "content": str(getattr(message, "content", "") or "")}
 
     def _history_message_text(self, msg: dict[str, Any]) -> str:
         MAX_CHARS = 2000
@@ -297,27 +478,131 @@ class BailianExtractionProvider(ExtractionProvider):
         request = build_extraction_user_prompt_payload(payload)
         return json.dumps(request, ensure_ascii=False, default=str)
 
-    def _parse_and_validate(self, content: str) -> ExtractionProviderResult:
-        raw_output = self._parse_json(content)
-        output = ExtractionOutput.model_validate(raw_output)
-        return output.to_provider_result(raw_output)
+    def _build_provider_result(self, message: Any) -> ExtractionProviderResult:
+        content = (getattr(message, "content", None) or "").strip()
+        native_tool_calls = getattr(message, "tool_calls", None) or []
+        tool_calls: list[ExtractionToolCall] = []
+        raw_tool_calls: list[dict[str, Any]] = []
+        for native in native_tool_calls:
+            extraction_tool_call, raw_dump = self._parse_native_tool_call(native)
+            tool_calls.append(extraction_tool_call)
+            raw_tool_calls.append(raw_dump)
 
-    def _parse_json(self, content: str) -> dict[str, Any]:
+        if not content and not tool_calls:
+            raise BailianOutputError("empty_response")
+
+        intent = self._derive_intent(tool_calls, content)
+        requires_review = any(tc.name in _RECORD_TOOL_NAMES for tc in tool_calls)
+        confidence = self._aggregate_confidence(tool_calls)
+        raw_output: dict[str, Any] = {
+            "content": content,
+            "tool_calls": raw_tool_calls,
+        }
+
+        return ExtractionProviderResult(
+            assistant_text=content,
+            intent=intent,
+            requires_review=requires_review,
+            confidence=confidence,
+            tool_calls=tool_calls,
+            warnings=[],
+            raw_output=raw_output,
+        )
+
+    def _parse_native_tool_call(self, native: Any) -> tuple[ExtractionToolCall, dict[str, Any]]:
         try:
-            data = json.loads(content)
+            name = native.function.name
+            arguments_text = native.function.arguments or "{}"
+            tool_call_id = native.id
+        except AttributeError as exc:
+            raise BailianOutputError(f"malformed_tool_call: {exc}") from exc
+        if name not in _ALLOWED_TOOL_NAMES:
+            raise BailianOutputError(f"unsupported_tool_name: {name}")
+        try:
+            args = json.loads(arguments_text)
         except json.JSONDecodeError as exc:
-            raise BailianOutputError("invalid_json") from exc
-        if not isinstance(data, dict):
-            raise BailianOutputError("json_root_not_object")
-        return data
+            raise BailianOutputError(f"invalid_tool_arguments_json: {exc}") from exc
+        if not isinstance(args, dict):
+            raise BailianOutputError("tool_arguments_not_object")
+
+        grounding = self._pop_grounding(args)
+        tool_call = ExtractionToolCall(
+            name=name,  # type: ignore[arg-type]
+            arguments=args,
+            confidence=self._extract_confidence(args),
+            grounding=grounding,
+            warnings=[],
+            tool_call_id=tool_call_id,
+        )
+        raw_dump = {
+            "id": tool_call_id,
+            "type": "function",
+            "function": {"name": name, "arguments": arguments_text},
+        }
+        return tool_call, raw_dump
+
+    def _pop_grounding(self, args: dict[str, Any]) -> ActionGrounding | None:
+        grounding_dict = args.pop("grounding", None)
+        if not isinstance(grounding_dict, dict):
+            return None
+        source = grounding_dict.get("source")
+        evidence_text = str(grounding_dict.get("evidence_text") or "")
+        if source not in _GROUNDING_SOURCES:
+            return None
+        confidence_raw = grounding_dict.get("confidence")
+        confidence: Decimal | None
+        if isinstance(confidence_raw, (int, float)):
+            try:
+                confidence = Decimal(str(confidence_raw))
+            except (ValueError, ArithmeticError):
+                confidence = None
+        else:
+            confidence = None
+        return ActionGrounding(
+            source=source,  # type: ignore[arg-type]
+            evidence_text=evidence_text,
+            source_id=grounding_dict.get("source_id"),
+            confidence=confidence,
+        )
+
+    def _extract_confidence(self, args: dict[str, Any]) -> Decimal | None:
+        value = args.get("confidence")
+        if isinstance(value, (int, float)):
+            try:
+                return Decimal(str(value))
+            except (ValueError, ArithmeticError):
+                return None
+        return None
+
+    def _derive_intent(
+        self,
+        tool_calls: list[ExtractionToolCall],
+        assistant_text: str,
+    ) -> Intent:
+        if any(tc.name in _RECORD_TOOL_NAMES for tc in tool_calls):
+            return "fitness_record"
+        return "answer_fitness_question"
+
+    def _aggregate_confidence(
+        self,
+        tool_calls: list[ExtractionToolCall],
+    ) -> Decimal | None:
+        values = [tc.confidence for tc in tool_calls if tc.confidence is not None]
+        if not values:
+            return None
+        return max(values)
 
     def _repair_prompt(self, reason: str) -> str:
         return (
-            "上一次输出不是合法 JSON 或不符合 LetMeFit JSON schema。"
-            f"失败原因: {reason}。"
-            "请只重新输出一个合法 JSON 对象，不要 Markdown，不要解释。"
-            "所有写入请求必须放入 tool_calls，不要使用自然语言声称已保存。"
+            f"上一次输出无法解析。失败原因: {reason}。"
+            "请重新输出：使用 tool_calls 调用所需工具，或在 content 中给出最终回答。"
         )
 
-    def _validation_error_details(self, exc: ValidationError) -> list[dict[str, Any]]:
-        return exc.errors(include_url=False, include_context=False, include_input=False)[:5]
+
+_ALLOWED_TOOL_NAMES: set[str] = {
+    tool["function"]["name"]
+    for tool in TOOL_SCHEMAS
+}
+
+
+_GROUNDING_SOURCES: set[str] = {"user_message", "model_inference"}

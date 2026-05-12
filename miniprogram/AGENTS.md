@@ -1,25 +1,44 @@
-# LetMeFit 微信小程序 AGENTS 指南
+# LetMeFit Miniprogram
 
-## 客户端定位
+WeChat Mini Program client — TypeScript, native WXML/WXSS. Builds and runs in WeChat DevTools.
 
-当前首个客户端为微信小程序，使用原生微信小程序 + TypeScript 实现。
+## Source Of Truth
 
-微信小程序只通过后端 REST/JSON API 读写数据，不直接连接数据库、对象存储、短信服务或 AI 模型服务。
+When documents conflict, this order wins:
 
-## 开发约束
+1. `../AGENTS.md` — project-level safety boundaries and core invariants
+2. `../docs/backend-api-v1.md` — API contracts the client must follow
+3. `../docs/agent-tool-call-design.md` — pending action confirmation flow
+4. This file
 
-- UI 以 Figma Make 原型为视觉与流程参考。
-- 所有业务 API 请求必须经过 `utils/request.ts`，统一处理响应结构、JWT 和刷新登录态。
-- AI 识别结果必须以 `pending_action` 确认卡展示，确认或修改后才能调用确认接口写入正式记录。
-- 客户端不得绕过 `pending_action` 直接保存 AI 草稿到餐食或身体指标接口。
-- 测试阶段图片原始文件可保留在客户端本地；语音识别需要将录音临时上传到后端或提供后端可访问的临时 URL。
-- 文案只提供一般健身管理与生活方式建议，不提供医疗诊断、治疗建议或疾病管理。
+## Commands
 
-## 目录约定
+```bash
+# from the miniprogram/ directory
+npx tsc --noEmit    # type check only, no output
+```
 
-- `pages/`：小程序页面。
-- `components/`：复用 UI 组件，尤其是待确认卡片。
-- `services/`：后端 API 封装。
-- `utils/`：请求、认证、日期和格式化工具。
-- `types/`：API 和小程序补充类型。
-- `config/`：环境配置。
+Runtime testing requires WeChat DevTools.
+
+## Rules
+
+- All API requests must go through `utils/request.ts` — handles response envelope, JWT, and token refresh.
+- AI extraction results must be presented as `pending_action` confirmation cards. The user must confirm or edit before the commit API is called.
+- UI must follow Figma designs. Complex pages without Figma sign-off do not enter implementation.
+- `client_local` audio cannot be transcribed by the backend directly. Upload via `POST /v1/uploads/local-file` first to get a server-accessible URL.
+
+## Change Scope
+
+| Area | Required reading |
+|------|-----------------|
+| Pending action card behavior or confirmation flow | `../docs/agent-tool-call-design.md` |
+| API request/response handling or error codes | `../docs/backend-api-v1.md` |
+
+## Directory
+
+- `pages/` — welcome, login, onboarding, home, record, agent, summary, profile
+- `components/pending-action-card/` — AI pending action confirmation card
+- `services/` — backend REST API wrappers
+- `utils/request.ts` — response envelope, JWT, token refresh
+- `config/` — environment config
+- `types/` — API and miniprogram type supplements

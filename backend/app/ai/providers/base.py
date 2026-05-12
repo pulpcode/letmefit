@@ -19,6 +19,9 @@ class ExtractionProvider(ABC):
     def last_debug_request_body(self) -> dict[str, Any] | None:
         return None
 
+    def last_debug_response_body(self) -> dict[str, Any] | None:
+        return None
+
 
 def get_extraction_provider(settings: Settings | None = None) -> ExtractionProvider:
     from app.ai.providers.bailian import BailianExtractionProvider

@@ -609,6 +609,11 @@
               <pre id="llmRequestOutput"></pre>
             </div>
             <div class="state copyable">
+              <span>LLM 原始响应 body</span>
+              <button class="copy-btn secondary" data-target="llmResponseOutput">复制</button>
+              <pre id="llmResponseOutput"></pre>
+            </div>
+            <div class="state copyable">
               <span>LLM Tool Calls</span>
               <button class="copy-btn secondary" data-target="llmToolCallsOutput">复制</button>
               <pre id="llmToolCallsOutput"></pre>
@@ -1085,6 +1090,7 @@
         pre.classList.remove("error");
         pre.textContent = JSON.stringify(withoutDebugContext(value), null, 2);
         $("llmRequestOutput").textContent = JSON.stringify(extractLlmRequestBody(value), null, 2);
+        $("llmResponseOutput").textContent = JSON.stringify(extractLlmResponseBody(value), null, 2);
         $("llmToolCallsOutput").textContent = JSON.stringify(extractLlmToolCalls(value), null, 2);
         $("agentTraceOutput").textContent = JSON.stringify(extractAgentTrace(value), null, 2);
       }
@@ -1094,6 +1100,7 @@
         pre.classList.add("error");
         pre.textContent = JSON.stringify(error, null, 2);
         $("llmRequestOutput").textContent = "";
+        $("llmResponseOutput").textContent = "";
         $("llmToolCallsOutput").textContent = "";
         $("agentTraceOutput").textContent = "";
       }
@@ -1126,6 +1133,41 @@
         }
         for (const item of Object.values(value)) {
           const found = findLlmRequestBody(item);
+          if (found) {
+            return found;
+          }
+        }
+        return null;
+      }
+
+      function extractLlmResponseBody(value) {
+        const responseBody = findLlmResponseBody(value);
+        if (responseBody) {
+          return responseBody;
+        }
+        return {
+          note: '本次响应没有 debug_context.llm_response_body。发送消息并勾选"显示 LLM 上下文"后会显示（仅 bailian provider 可用）。',
+        };
+      }
+
+      function findLlmResponseBody(value) {
+        if (!value || typeof value !== "object") {
+          return null;
+        }
+        if (value.debug_context && value.debug_context.llm_response_body) {
+          return value.debug_context.llm_response_body;
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const found = findLlmResponseBody(item);
+            if (found) {
+              return found;
+            }
+          }
+          return null;
+        }
+        for (const item of Object.values(value)) {
+          const found = findLlmResponseBody(item);
           if (found) {
             return found;
           }

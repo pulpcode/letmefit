@@ -318,6 +318,7 @@ class ConversationService:
             "normalized_content": normalized_content,
             "conversation_context": extraction_input.context,
             "llm_request_body": self.extraction_service.provider.last_debug_request_body(),
+            "llm_response_body": self.extraction_service.provider.last_debug_response_body(),
             "llm_user_prompt_payload": build_extraction_user_prompt_payload(extraction_input),
             "llm_model_outputs": llm_model_outputs,
             "llm_tool_calls": self._debug_tool_calls(llm_model_outputs),

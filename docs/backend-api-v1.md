@@ -9,8 +9,10 @@
 
 ### 1.1 Base URL
 
+生产（示例占位，实际以部署配置为准）：
+
 ```text
-https://api.letmefit.example.com/v1
+https://www.letmefit.cloud/v1
 ```
 
 本地开发：

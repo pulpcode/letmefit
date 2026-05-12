@@ -144,6 +144,7 @@ class BailianExtractionProvider(ExtractionProvider):
     def __init__(self, settings: Settings | None = None, client: OpenAI | None = None) -> None:
         self.settings = settings or get_settings()
         self._last_debug_request_body: dict[str, Any] | None = None
+        self._last_debug_response_body: dict[str, Any] | None = None
         api_key = self.settings.bailian_api_key or self.settings.dashscope_api_key
         if not api_key:
             raise AppError(
@@ -200,6 +201,7 @@ class BailianExtractionProvider(ExtractionProvider):
         try:
             completion = self.client.chat.completions.create(**request_body)
         except OpenAIError as exc:
+            self._last_debug_response_body = {"error": str(exc), "type": exc.__class__.__name__}
             raise AppError(
                 "AI_EXTRACTION_FAILED",
                 "百炼 LLM 调用失败",
@@ -207,16 +209,30 @@ class BailianExtractionProvider(ExtractionProvider):
                 details={"provider": self.provider_name},
             ) from exc
 
+        self._last_debug_response_body = self._dump_completion(completion)
         content = completion.choices[0].message.content if completion.choices else None
         if not isinstance(content, str) or not content:
             raise BailianOutputError("empty_response")
         return content
+
+    def _dump_completion(self, completion: Any) -> dict[str, Any]:
+        try:
+            return completion.model_dump(mode="json")
+        except AttributeError:
+            pass
+        try:
+            return json.loads(completion.model_dump_json())
+        except AttributeError:
+            return {"repr": repr(completion)}
 
     def debug_request_body(self, payload: ExtractionInput) -> dict[str, Any]:
         return self._request_body(self._messages(payload))
 
     def last_debug_request_body(self) -> dict[str, Any] | None:
         return self._last_debug_request_body
+
+    def last_debug_response_body(self) -> dict[str, Any] | None:
+        return self._last_debug_response_body
 
     def _request_body(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         return {

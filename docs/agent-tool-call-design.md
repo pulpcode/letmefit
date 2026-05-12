@@ -2,7 +2,7 @@
 
 ## Summary
 
-当前模型定位是“健身管理对话助手 + 结构化记录工具调用者”。后端运行 bounded ReAct loop；记录草稿需要人确认时，loop 会异步暂停，等待用户确认/修改/放弃后再用 observation 恢复：
+当前模型定位是“健身管理对话助手”。后端运行 bounded ReAct loop；记录草稿需要人确认时，loop 会异步暂停，等待用户确认/修改/放弃后再用 observation 恢复：
 
 ```text
 User message

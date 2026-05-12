@@ -58,7 +58,7 @@ HUMAN_CONFIRMATION_TOOL_NAMES = RECORD_TOOL_NAMES | {"update_pending_action"}
 
 ---
 
-### 5. Grounding evidence_text 子串匹配脆弱（暂记录，小优化）
+### 5. Grounding evidence_text 子串匹配脆弱（暂记录，小优化，有缓解）
 
 **文件**：`extraction_service.py:_grounding_references_active_pending_action`
 
@@ -70,23 +70,19 @@ HUMAN_CONFIRMATION_TOOL_NAMES = RECORD_TOOL_NAMES | {"update_pending_action"}
 
 ---
 
-### 6. `grounding_requires_confirmation` warning 在 update 后残留但不影响状态（暂记录）
+### 6. `grounding_requires_confirmation` warning 在 update 后残留 ✅ 已不适用
 
-**文件**：`pending_actions.py:_apply_status_from_draft`
+**原文件**：`pending_actions.py:_apply_status_from_draft`
 
-**现象**：更新草稿时，`_apply_status_from_draft` 过滤 clarification 类 warning，但 `grounding_requires_confirmation` 不在过滤列表，会永久留在 `warnings_json` 里。这个 warning 不影响 pending action 能否被 commit，但 UI 可见，可能让用户困惑。
-
-**决策**：该 warning 有合理的审计价值（记录 grounding 来源）。暂不过滤，但建议 UI 端对此类 warning 做友好展示而非报错式提示。
+**结论**：全库搜索无任何代码生成 `grounding_requires_confirmation` warning，该 warning 类型已不再产生。问题源头消失，无需处理。
 
 ---
 
-### 7. `commit_pending_action` 与 `commit_pending_actions` 功能高度重叠（暂记录）
+### 7. `commit_pending_action` 与 `commit_pending_actions` 功能高度重叠 ✅ 已解决
 
-**文件**：`types.py`, `extraction_service.py`
+**原文件**：`types.py`, `extraction_service.py`
 
-**现象**：两个工具几乎相同，LLM 选择时没有明确决策规则，且两者的 tool_result 格式不对称（单个版在 `extraction_service.py:453-481` 走 `_execute_pending_action_tool`，批量版在 `:483-516` 结构不同）。
-
-**暂不合并**：需评估 API 层 continuation 是否依赖单/批量区分。记录以备后续重构。
+**结论**：两个 commit 工具已从 `ToolName` 和工具执行逻辑中完全移除。确认操作改由用户通过 REST API 按钮完成，不再是 LLM 工具调用。system prompt 明确写入"禁止调用 commit_pending_action"。
 
 ---
 
@@ -102,23 +98,15 @@ HUMAN_CONFIRMATION_TOOL_NAMES = RECORD_TOOL_NAMES | {"update_pending_action"}
 
 ---
 
-### 9. One-turn token 过期无通知（暂记录，产品决策）
+### 9. One-turn offer 过期无通知 ✅ 已不适用
 
-**文件**：`dialogue_state.py:update_dialogue_state_after_assistant`
-
-**现象**：每次 assistant 回复前，`state["ephemeral_state"].pop("active_offer", None)` 静默清除上一个 offer。用户发了无关消息导致 offer 消失，用户并不知情，下条消息引用该 offer 时会失效。
-
-**是否修**：这是 one-turn token 的设计预期。若需要通知，需在 response 层传递"offer_expired"事件给前端。产品决策，暂记录。
+**结论**：active_offer 功能已从 `dialogue_state.py` 和 `conversation_context.py` 中完全删除，entire offer 机制不再存在。
 
 ---
 
-### 10. Active offer 与 active pending actions 优先级未定义（暂记录）
+### 10. Active offer 与 active pending actions 优先级未定义 ✅ 已不适用
 
-**文件**：`conversation_context.py`, `prompt_payload.py`
-
-**现象**：context 同时注入 `ephemeral_state.active_offer` 和 `active_pending_actions`，system prompt 和 CONTEXT_CONTRACT 对两者同时存在时的优先级描述不清晰。
-
-**建议**：在 CONTEXT_CONTRACT 或 system prompt 增加规则："当 `active_pending_actions` 非空时，用户消息优先解析为对确认卡的操作；只有当用户消息明确与 pending action 无关时，才考虑 active_offer。"
+**结论**：active_offer 功能已删除，问题不再存在。`prompt_payload.py` 的 `CONTEXT_CONTRACT` 已加入 `active_pending_actions` 完整优先级规则（优先处理确认卡修改/放弃，不相关时在 assistant_text 结尾提醒）。
 
 ---
 

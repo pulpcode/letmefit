@@ -1,72 +1,62 @@
-# LetMeFit Backend Instructions
+# LetMeFit Backend
 
 ## Source Of Truth
 
-Backend work must follow these documents:
+When documents conflict, this order wins:
 
-- `../AGENTS.md`
-- `../docs/technical-architecture.md`
-- `../docs/backend-api-v1.md`
+1. `../docs/backend-api-v1.md` — API contracts and response schemas
+2. `../docs/agent-tool-call-design.md` — pending action semantics and grounding rules
+3. `../docs/technical-architecture.md` — tech choices and module layout
+4. `../docs/conversation-context-design.md` — context window composition and rolling summary
+5. `../AGENTS.md` — project-level constraints
 
-If instructions conflict, prefer the more specific backend API document, then the technical architecture document, then the root `AGENTS.md`.
+## Commands
 
-## Stack
+```bash
+# from the backend/ directory
+uv run pytest                          # run all tests
+uv run ruff check .                    # lint
+uv run ruff format --check .           # format check
+uv run uvicorn app.main:app --reload   # dev server
+uv run alembic upgrade head            # apply migrations
+```
 
-- Python + FastAPI
-- Python environment and dependency management with uv
-- MySQL 8.4 LTS
-- SQLAlchemy + Alembic + PyMySQL
-- Redis
-- Aliyun Dypnsapi SMS verification
-- JWT access token + refresh token
-- uv for running the FastAPI backend on the host
-- Docker Compose only for local/small-server MySQL and Redis
+All changes must pass `uv run pytest` and `uv run ruff check .` before done.
 
-Do not introduce a Java backend in V1.
+## Change Scope
+
+Before touching these areas, read the listed doc first:
+
+| Area | Required reading |
+|------|-----------------|
+| Agent loop, pending actions, context building | `../docs/agent-tool-call-design.md` + `../docs/backend-design-problems.md` |
+| LLM output or extraction schema | `../docs/ai-extraction-schema-v1.md` |
+| Database schema | `../docs/database-design-v1.md` — Alembic only, no manual table edits |
+| API response contracts | `../docs/backend-api-v1.md` — update doc before changing behavior |
+| System prompts | Re-check if model role, safety boundaries, tool-call contract, or context authority changed |
 
 ## Backend Rules
 
-- Keep route handlers thin.
-- Put business logic in service modules.
-- Put request and response contracts in Pydantic schemas.
+- Keep route handlers thin; business logic in service modules.
+- Request and response contracts in Pydantic schemas.
 - All private APIs must validate JWT.
 - All private user data must be isolated by `user_id`.
 - API response format must follow `../docs/backend-api-v1.md`.
-- All database schema changes must use Alembic migrations.
 - Do not commit secrets, access keys, tokens, or production `.env` files.
-- Use `uv sync` and `uv run` for local backend development.
-- Keep `uv.lock` committed when Python dependencies change.
-- Do not add a backend Dockerfile as the default deployment path.
+- Use `uv sync` and `uv run` for local development. Keep `uv.lock` committed.
 - Bind Dockerized MySQL and Redis to `127.0.0.1`; do not expose database ports publicly.
+- Do not add a backend Dockerfile as the default deployment path.
 
 ## Auth And SMS
 
-- SMS verification must use Aliyun Dypnsapi:
-  - `SendSmsVerifyCode`
-  - `CheckSmsVerifyCode`
 - Do not return SMS verification codes in production.
-- Treat SMS verification as successful only when Aliyun verification result is `PASS`.
-- Use Redis only for rate limits, anti-abuse, failed attempt counters, short locks, and short-lived task state.
-- Redis must not be the primary store for Aliyun-generated SMS verification codes.
+- Redis is for rate limits, anti-abuse, failed attempt counters, and short locks only — not primary SMS code storage.
 
 ## Agent Rules
 
-- Use conversation/message based APIs for user interaction.
-- AI outputs that would create business records must become pending actions in the conversation before they can be committed.
-- Do not create narrow multimodal endpoints such as `meal-photo`, `meal-voice`, or `scale-photo`.
-- V1 Agent pipeline is lightweight and self-built:
-  - `InputNormalizer`
-  - `ConversationContextBuilder`
-  - `AgentRuntime`
-  - `ExtractionProvider`
-  - `ExtractionService`
-  - backend commit rules / response composition
-- Do not introduce LangChain, LangGraph, or Deep Agents unless the architecture document is explicitly changed.
+- AI outputs that would create business records must become pending actions before they can be committed.
 - Model providers must be replaceable through adapters.
-- V1 text LLM provider is Alibaba Cloud Bailian / DashScope through the OpenAI-compatible API.
-- LLM structured output must follow `../docs/ai-extraction-schema-v1.md`.
-- When product, architecture, or agent flow design changes, re-review backend system prompts and update them if the model role, safety boundary, tool-call contract, or context authority rules have changed.
-- Keep `AI_PROVIDER=mock` as the default for tests and local development unless explicitly testing Bailian.
+- Keep `AI_PROVIDER=mock` as the default for tests and local development.
 - Build model context through `ConversationContextBuilder`; do not send full conversation history to the model.
 - Treat `conversation_summaries` as rolling context only, not as formal user facts.
 - Run multimodal message parts through `InputNormalizer` before extraction.
@@ -75,11 +65,9 @@ Do not introduce a Java backend in V1.
 
 ## Testing
 
-- Add tests for meaningful backend behavior.
 - Mock external services in tests.
 - Minimum expected test areas:
-  - health check
-  - response envelope
+  - health check and response envelope
   - validation errors
   - JWT-protected routes
   - SMS send/verify adapter
